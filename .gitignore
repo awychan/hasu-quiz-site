@@ -1,0 +1,4 @@
+# 音声・動画・画像は権利物のためリポジトリに入れない（Google Drive で管理）
+media/*
+!media/README.md
+.DS_Store
