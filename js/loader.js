@@ -108,8 +108,21 @@
     if (parts.length === 2) return { order, category: parts[0], name: parts[1], modeLabel: '' };
     return { order, category: '', name: parts[0], modeLabel: '' };
   }
-  const tierOf = (file) => { const m = file.match(/_ver(\d)/i); return m ? ({ 1: 3, 2: 2, 3: 1 }[m[1]] || null) : null; };
-  const isAnswer = (file) => /回答|答え|answer/i.test(file) || /_ver4/i.test(file);
+  // 段階（ステップ）の読み取り：_ver1/_ver2/_ver3 → 3点/2点/1点、_ver4 → 回答
+  // 代わりに ①②③④ や、名前の末尾の 1〜4 でもよい（例：画像①.png、画像2.png）
+  const CIRCLED = { '①': 1, '②': 2, '③': 3, '④': 4, '１': 1, '２': 2, '３': 3, '４': 4 };
+  function stepOf(file) {
+    const stem = file.replace(/\.[^.]+$/, '');
+    const m = stem.match(/_ver(\d)/i);
+    if (m) return parseInt(m[1], 10);
+    const c = stem.match(/[①②③④１２３４]/);
+    if (c) return CIRCLED[c[0]];
+    const t = stem.match(/(?:^|[^\d])([1-4])$/);
+    return t ? parseInt(t[1], 10) : null;
+  }
+  const STEP_TIER = { 1: 3, 2: 2, 3: 1 };
+  const tierOf = (file) => { const st = stepOf(file); return st && STEP_TIER[st] ? STEP_TIER[st] : null; };
+  const isAnswer = (file) => /回答|正解|答え|answer/i.test(file) || stepOf(file) === 4;
 
   function buildRound(roundName, files) {
     const byGenre = new Map();
@@ -173,7 +186,11 @@
         q.files.forEach((segs) => { const f = segs[segs.length - 1]; const t = tierOf(f); if (t && TEXT_EXT.test(f)) out.lyricsFiles[t] = filePath(genre, segs); else if (isAnswer(f) && TEXT_EXT.test(f)) out.answerFile = filePath(genre, segs); else if (AUDIO_EXT.test(f) && !t) out.audio = filePath(genre, segs); });
       } else {
         out.images = {};
-        q.files.forEach((segs) => { const f = segs[segs.length - 1]; if (!IMAGE_EXT.test(f)) return; const p = filePath(genre, segs); const t = tierOf(f); if (isAnswer(f)) out.images.answer = p; else if (t === 3) out.images.question = p; else if (t === 2) out.images.hint1 = p; else if (t === 1) out.images.hint2 = p; else if (!out.images.question) out.images.question = p; });
+        const imgs = q.files.filter((segs) => IMAGE_EXT.test(segs[segs.length - 1])).sort((a, b) => a[a.length - 1].localeCompare(b[b.length - 1], 'ja', { numeric: true }));
+        imgs.forEach((segs) => { const f = segs[segs.length - 1]; const p = filePath(genre, segs); const t = tierOf(f); if (isAnswer(f)) out.images.answer = p; else if (t === 3) out.images.question = p; else if (t === 2) out.images.hint1 = p; else if (t === 1) out.images.hint2 = p; });
+        // 段階が読み取れない画像は名前順に 問題 → ヒント1 → ヒント2 → 回答 と割り当てる
+        const rest = imgs.filter((segs) => { const f = segs[segs.length - 1]; return !isAnswer(f) && !tierOf(f); });
+        ['question', 'hint1', 'hint2', 'answer'].forEach((slot) => { if (!out.images[slot] && rest.length) out.images[slot] = filePath(genre, rest.shift()); });
       }
       return out;
     });
@@ -187,13 +204,16 @@
       else { points = 1; label = '問題'; rest = r; }
       const file = rest[rest.length - 1];
       if (!VIDEO_EXT.test(file) && !AUDIO_EXT.test(file) && !IMAGE_EXT.test(file)) return;
+      // 問題と回答の対：同じ「幹」（_問題／_正解 などを除いた名前）で組にする
+      const stem = file.replace(/\.[^.]+$/, '').replace(/[_ 　-]*(問題|回答|正解|答え|question|answer)\s*$/i, '');
       let id = null;
       if (rest.length >= 2) { const m = rest[0].match(/^第(\d+)問/); if (m) id = parseInt(m[1], 10); }
-      if (id == null) { const stem = file.replace(/\.[^.]+$/, '').replace(/_(問題|回答|答え|question|answer)$/i, ''); id = numberOf(stem.replace(/^[^\d]*/, '')); }
-      if (!levels.has(points)) levels.set(points, { points, label, questions: new Map() });
-      const qs = levels.get(points).questions;
-      if (id == null) id = qs.size + 1;
-      if (!qs.has(id)) qs.set(id, { id, key: `L${points}-${id}`, question: null, answer: null });
+      if (id == null) { const n = stem.match(/(\d+)\s*$/); if (n) id = parseInt(n[1], 10); }
+      if (!levels.has(points)) levels.set(points, { points, label, questions: new Map(), stems: new Map() });
+      const lv = levels.get(points), qs = lv.questions;
+      const stemKey = rest.length >= 2 ? rest[0] : stem;
+      if (id == null) { if (!lv.stems.has(stemKey)) lv.stems.set(stemKey, qs.size + 1); id = lv.stems.get(stemKey); }
+      if (!qs.has(id)) qs.set(id, { id, key: `L${points}-${id}`, question: null, answer: null, stem: stemKey });
       const p = filePath(genre, r);
       if (isAnswer(file)) qs.get(id).answer = p; else qs.get(id).question = p;
     });
@@ -213,5 +233,5 @@
     try { const r = await fetch(url, { cache: 'no-store' }); const t = r.ok ? (await r.text()).trim() : null; textCache.set(url, t); return t; } catch (e) { textCache.set(url, null); return null; }
   }
 
-  window.QuizLoader = { discoverRounds, loadRound, loadText, BASE, LIST };
+  window.QuizLoader = { discoverRounds, loadRound, loadText, BASE, LIST, parse: buildRound };
 })();
