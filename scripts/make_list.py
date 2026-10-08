@@ -12,7 +12,9 @@
   「_」で始まる .txt 以外のファイル、一覧ファイル自身。「_曲名.txt」のようなメモは含める
 ・名前は NFC に揃えて書く
 ・Google Drive（~/Library/CloudStorage、リポジトリの drive リンク、~/Google Drive）の中では実行しない。
-  運営の共有フォルダに一覧ファイルを書き込んでしまうため（--stdout は書き込まないので可）
+  運営の共有フォルダに一覧ファイルを書き込んでしまうため（--stdout は書き込まないので可）。
+  置き場所だけでなく、各回フォルダ（シンボリックリンクの先）と書き込むファイル（の実体）も調べ、
+  1 つでも Drive の中なら何も書かずに止まる
 
 ローカルサーバー（python3 -m http.server）で使うだけなら実行しなくても動く。
 注意：一覧ファイルがあるとサイトはそれだけを読む。ファイルを足したら必ず実行し直すこと
@@ -63,6 +65,20 @@ def drive_reason(base: str):
     return None
 
 
+def refuse(path: str, why: str):
+    print(f'実行しません：{path} は {why}')
+    print('Drive の共有フォルダに一覧ファイルを書き込まないため。media/ にコピーしてから実行するか、--stdout で表示だけしてください。')
+    sys.exit(2)
+
+
+def open_for_write(path: str):
+    """書く直前にもう一度、実体（realpath）が Drive の外か確かめてから開く"""
+    why = drive_reason(path)
+    if why:
+        refuse(path, why)
+    return open(path, 'w', encoding='utf-8')
+
+
 def list_round(round_dir: str) -> list:
     out = []
     for root, dirs, files in os.walk(round_dir):
@@ -88,13 +104,21 @@ def main():
         sys.exit(1)
     why = drive_reason(base)
     if why and not to_stdout:
-        print(f'実行しません：{base} は {why}')
-        print('Drive の共有フォルダに一覧ファイルを書き込まないため。media/ にコピーしてから実行するか、--stdout で表示だけしてください。')
-        sys.exit(2)
+        refuse(base, why)
     rounds = sorted(d for d in os.listdir(base) if os.path.isdir(os.path.join(base, d)) and not hidden_dir(d))
     if not rounds:
         print(f'回のフォルダ（第1回 など）が見つかりません: {base}')
         sys.exit(1)
+    if not to_stdout:
+        # 回フォルダが Drive へのシンボリックリンクだったり、一覧ファイル自体がリンクだったりしても書かない。
+        # 書き始める前に全部調べる（途中まで書いて止まらないように）
+        targets = [os.path.join(base, LIST)]
+        for r in rounds:
+            targets += [os.path.join(base, r), os.path.join(base, r, LIST)]
+        for t in targets:
+            why = drive_reason(t)
+            if why:
+                refuse(t, why)
     for r in rounds:
         lines = list_round(os.path.join(base, r))
         nfiles = sum(1 for l in lines if not l.endswith('/'))
@@ -102,12 +126,12 @@ def main():
             print(f'# {nfc(r)}/{LIST}（{nfiles} ファイル、{len(lines) - nfiles} フォルダ）')
             print('\n'.join(lines))
             continue
-        with open(os.path.join(base, r, LIST), 'w', encoding='utf-8') as fh:
+        with open_for_write(os.path.join(base, r, LIST)) as fh:
             fh.write('\n'.join(lines) + ('\n' if lines else ''))
         print(f'{nfc(r)}: {nfiles} ファイル・{len(lines) - nfiles} フォルダ → {nfc(r)}/{LIST}')
     if to_stdout:
         return
-    with open(os.path.join(base, LIST), 'w', encoding='utf-8') as fh:
+    with open_for_write(os.path.join(base, LIST)) as fh:
         fh.write('\n'.join(nfc(r) for r in rounds) + '\n')
     print(f'回の一覧 → {LIST}: {", ".join(nfc(r) for r in rounds)}')
 

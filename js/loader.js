@@ -159,7 +159,8 @@
     const s = norm(name).trim();
     const m = s.match(/^(?:第)?(\d+)問?(?=$|[_ 　-])/) || s.match(/^問題(\d+)(?=$|[_ 　-])/);
     if (!m) return null;
-    const out = { id: parseInt(m[1], 10), form: /^問題/.test(s) ? 'mondai' : 'dai', scoring: null, reverse: false, fixedPoints: null, suffixLabel: '', unknown: [] };
+    // marked：「第」「問」が付いている（第N問・N問・問題N）。裸の「N」「N_…」は marked でない
+    const out = { id: parseInt(m[1], 10), form: /^問題/.test(s) ? 'mondai' : 'dai', marked: /[第問]/.test(m[0]), scoring: null, reverse: false, fixedPoints: null, suffixLabel: '', unknown: [] };
     const rest = trimSep(s.slice(m[0].length));
     if (!rest) return out;
     const labels = [];
@@ -174,6 +175,17 @@
     if (out.unknown.length && !out.scoring) out.scoring = 'deduct';
     out.suffixLabel = labels.join('_');
     return out;
+  }
+
+  // フォルダを問題フォルダとして読むか（読むなら parseQuestionFolder の結果、読まないなら null ＝サブジャンル）
+  //  ・接尾辞が無い／全部知っている接尾辞（減点・点数・逆転・N点）→ 問題フォルダ
+  //  ・知らない接尾辞：「第N問_…」「問題N_…」でサブフォルダが無いときだけ問題フォルダ（警告して減点扱い）。
+  //    「01_サブ」「1 サブ」のような先頭が数字だけの名前や、サブフォルダを持つものはサブジャンル（数字は並び順に使う）
+  function questionFolderOf(name, hasSubdirs) {
+    const q = parseQuestionFolder(name);
+    if (!q) return null;
+    if (!q.unknown.length) return q;
+    return q.marked && !hasSubdirs ? q : null;
   }
 
   // ファイル名から印を 1 つだけ取る：答えの語 or 問題側の語 ＞ 段階（①〜⑳・㉑〜㉟・_verN）
@@ -271,7 +283,7 @@
         const stems = new Map();
         items.forEach((it) => { const k = it.stem.toLowerCase(); if (!stems.has(k)) stems.set(k, { stem: it.stem, items: [] }); stems.get(k).items.push(it); });
         const stemList = [...stems.values()].sort((a, b) => naturalCmp(a.stem, b.stem));
-        const folderQ = node === gnode ? null : parseQuestionFolder(node.raw);
+        const folderQ = node === gnode ? null : questionFolderOf(node.raw, node.dirs.size > 0);
         if (folderQ && folderQ.unknown.length) {
           warn(gw, 'unknown-suffix', relOf(node.segs), `問題フォルダの知らない接尾辞（${folderQ.unknown.join('・')}）→ 減点方式として読みます`);
         }
@@ -379,7 +391,7 @@
         qw.forEach((w) => gw.push(w));
       };
 
-      // ジャンルから葉までたどる。級の名前なら level、問題フォルダ（第N問・問題N）でなければ group
+      // ジャンルから葉までたどる。級の名前なら level、問題フォルダ（questionFolderOf）でなければ group
       const visit = (node, ctx) => {
         if (node.files.length) processLeaf(node, ctx);
         else if (!node.dirs.size) { emptyCheck(node); return; }
@@ -389,7 +401,7 @@
           const lv = levelOf(child.raw);
           let next;
           if (lv) next = { groups: ctx.groups, level: lv };
-          else if (parseQuestionFolder(child.raw)) next = ctx;
+          else if (questionFolderOf(child.raw, child.dirs.size > 0)) next = ctx;
           else next = { groups: ctx.groups.concat(norm(child.raw)), level: ctx.level };
           if (!child.files.length && !child.dirs.size) { emptyCheck(child); return; }
           visit(child, next);
@@ -468,6 +480,6 @@
   window.QuizLoader = {
     discoverRounds, loadRound, loadText, base: () => BASE, baseInfo, LIST, parse,
     // 検査用（scripts/check_media.mjs・tests）
-    _internal: { walk, fetchListing, classify, parseQuestionFolder, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS },
+    _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS },
   };
 })();

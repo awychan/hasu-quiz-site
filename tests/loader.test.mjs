@@ -1,4 +1,4 @@
-// ローダー v3 のテスト（node --test tests/）。名前はすべてダミー
+// ローダー v3 のテスト（node --test）。名前はすべてダミー
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadQuizLoader } from '../scripts/check_media.mjs';
@@ -218,4 +218,46 @@ test('同じ番号の問題フォルダはキーを分けて警告', () => {
   const g = only(r);
   assert.equal(new Set(g.questions.map((q) => q.key)).size, 2);
   assert.ok(types(r).includes('duplicate-key'));
+});
+
+test('先頭が数字のサブジャンル（01_サブA・02_サブB）は問題フォルダにしない：group が残り、キーがぶつからない', () => {
+  const d = '文章_テスト_減点方式';
+  const r = parse([`${d}/02_サブB/第1問/x_①.png`, `${d}/02_サブB/第1問/x_解答.png`, `${d}/01_サブA/第1問/x_①.png`, `${d}/01_サブA/第1問/x_解答.png`,
+    `${d}/10_サブC/第1問/x_①.png`, `${d}/10_サブC/第1問/x_解答.png`]);
+  const g = only(r);
+  assert.deepEqual(g.questions.map((q) => q.key), ['01_サブA~1', '02_サブB~1', '10_サブC~1'], '数字順に並ぶ');
+  assert.deepEqual(g.questions.map((q) => q.group), ['01_サブA', '02_サブB', '10_サブC']);
+  assert.deepEqual(types(r), []);
+});
+
+test('「1 サブ/初級/…」も group＋level として読む', () => {
+  const d = '文章_テスト_減点方式/1 サブ/初級';
+  const r = parse([`${d}/x_①.png`, `${d}/x_解答.png`]);
+  const q = q1(r);
+  assert.equal(q.group, '1 サブ'); assert.equal(q.level.label, '初級'); assert.equal(q.key, '1 サブ~初級~1');
+  assert.deepEqual(types(r), []);
+});
+
+test('ファイルを直接持つ「01_サブ」も group（unknown-suffix の警告は出さない）', () => {
+  const d = '文章_テスト_減点方式/01_サブ';
+  const r = parse([`${d}/x_①.png`, `${d}/x_解答.png`]);
+  const q = q1(r);
+  assert.equal(q.group, '01_サブ'); assert.equal(q.key, '01_サブ~1'); assert.equal(q.scoringSource, 'genre');
+  assert.deepEqual(types(r), []);
+});
+
+test('サブフォルダを持つ「第1問_xxx」は group、サブフォルダの無い「第1問_xxx」は問題（警告）', () => {
+  const d = '文章_テスト_減点方式';
+  const r = parse([`${d}/第1問_xxx/第2問/x_①.png`, `${d}/第1問_xxx/第2問/x_解答.png`, `${d}/第3問_yyy/z_①.png`, `${d}/第3問_yyy/z_解答.png`]);
+  const g = only(r);
+  assert.deepEqual(g.questions.map((q) => q.key), ['3', '第1問_xxx~2']);
+  assert.deepEqual(r.warnings.filter((w) => w.type === 'unknown-suffix').map((w) => w.path), [`${d}/第3問_yyy`]);
+});
+
+test('questionFolderOf：知っている接尾辞だけなら問題フォルダ、裸の数字＋知らない語はサブジャンル', () => {
+  const f = L._internal.questionFolderOf;
+  for (const n of ['1', '01', '第1問', '問題2', '問題2_減点方式', '3_点数方式_3点', '4_逆転', '5_2点']) assert.ok(f(n, false), n);
+  for (const n of ['01_サブ', '1 サブ', '2-サブ']) assert.equal(f(n, false), null, n);
+  assert.ok(f('問題1_xxx', false)); assert.equal(f('問題1_xxx', true), null);
+  assert.ok(f('第1問', true), '接尾辞が無ければサブフォルダがあっても問題フォルダ');
 });
