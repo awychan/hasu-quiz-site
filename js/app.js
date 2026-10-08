@@ -148,12 +148,12 @@
 
   function renderLoading(msg) {
     render({ cls: 'center', header: `<div class="hdr-left"><span class="latin lg">${esc(CFG.event?.short || 'QUIZ')}</span><span class="event">${esc(CFG.event?.title || '')}</span></div>`,
-      main: `<div class="notice"><div class="spinner"></div><h1 class="page-title">${esc(msg)}</h1><p class="muted">${esc(L.BASE)}/ の中の回フォルダを読んでいます</p></div>`, footer: '<span class="spacer"></span>' });
+      main: `<div class="notice"><div class="spinner"></div><h1 class="page-title">${esc(msg)}</h1><p class="muted">${esc(L.base())}/ の中の回フォルダを読んでいます</p></div>`, footer: '<span class="spacer"></span>' });
   }
   function renderEmpty() {
     render({ cls: 'center', header: `<div class="hdr-left"><span class="latin lg">${esc(CFG.event?.short || 'QUIZ')}</span><span class="event">${esc(CFG.event?.title || '')}</span></div>`,
       main: `<div class="notice"><span class="notice-icon">${ICON.alert(40)}</span><h1 class="page-title">回のフォルダが見つかりません</h1>
-        <p class="muted">サイトのフォルダに <code>${esc(L.BASE)}/第1回/</code> のように回のフォルダを置き、その中にジャンルのフォルダ（例：<code>楽曲・音声_イントロ_減点方式</code>）と問題のフォルダを置いてください。</p>
+        <p class="muted">サイトのフォルダに <code>${esc(L.base())}/第1回/</code> のように回のフォルダを置き、その中にジャンルのフォルダ（例：<code>楽曲・音声_イントロ_減点方式</code>）と問題のフォルダを置いてください。</p>
         <p class="muted">サーバーは <code>python3 -m http.server 8765 --bind 127.0.0.1</code> で起動します。別のサーバーを使う場合は <code>scripts/make_list.py</code> で読み込み用ファイル.txt を作ってください。</p>
         <button class="btn grad" data-action="reload-all">${ICON.refresh()}もう一度読み込む</button></div>`,
       footer: '<span class="spacer"></span>' });
@@ -191,7 +191,7 @@
       main: `<div class="top-head"><div><span class="latin">ROUND SELECT</span><h1 class="page-title">第〇回を選択</h1></div><span class="hint">回のフォルダごとに1枚。出題済の記録は回ごとに別々に保存されます</span></div>
         <div class="round-grid">${cards}</div>`,
       footer: `<button class="btn ghost" data-action="reload-all">${ICON.refresh()}フォルダを再読み込み</button>
-        <span class="footer-note">読み込み元：${esc(sourceLabel(roundsSource))}（${esc(L.BASE)}/）</span><span class="spacer"></span>
+        <span class="footer-note">読み込み元：${esc(sourceLabel(roundsSource))}（${esc(L.base())}/）</span><span class="spacer"></span>
         <button class="btn ghost" data-action="fullscreen">${ICON.expand()}全画面</button>`,
     });
   }
