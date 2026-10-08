@@ -82,7 +82,7 @@
   const qDone = (st, q) => (q.mode === 'clips' ? P.isStarted(st) : P.isDone(st, q));
   const nextQ = (g) => g.questions.find((q) => !P.isStarted(qst(g, q)));
   // 音声の一覧型（仕様書タブ2）：ジャンル内の全問題が「段階・音声・減点・3 段階以下」のとき
-  const isAudioList = (g) => g.questions.length > 0 && g.questions.every((q) => q.mode === 'staged' && q.format === 'audio' && q.scoring === 'deduct' && q.stages.length <= 3);
+  const isAudioList = (g) => g.questions.length > 0 && g.questions.every((q) => q.mode === 'staged' && q.format === 'audio' && q.scoring === 'deduct' && q.stages.length <= TIER_POINTS.length);
 
   /* ---------------- 共通パーツ ---------------- */
   const chip = (text, cls = '') => `<span class="chip ${cls}">${text}</span>`;
@@ -115,7 +115,10 @@
     if (texts.has(url)) return texts.get(url);
     if (!pendingTexts.has(url)) {
       pendingTexts.add(url);
-      L.loadText(url).then((t) => { texts.set(url, t); pendingTexts.delete(url); fillTexts(url); });
+      L.loadText(url).then((t) => {
+        texts.set(url, t); pendingTexts.delete(url); fillTexts(url);
+        if (cur.q && cur.q.mode === 'clips' && cur.q.answer.textSrc === url && !videoOnStage()) rerender();   // 逆転：メモ全文の帯はメモが読めてから決まる
+      });
     }
     return undefined;
   }
@@ -133,7 +136,7 @@
     if (t === null) return '<span class="muted">（メモを読めません）</span>';
     if (part === 'first') return esc(firstLine(t));
     const m = /^clip:(\d+)$/.exec(part || '');
-    if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? esc(line) : esc(t).replace(/\n/g, '<br>'); }
+    if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? esc(line) : '<span class="muted">（この番号の行がありません）</span>'; }
     return esc(t).replace(/\n/g, '<br>');
   }
   const textSpan = (url, part, cls = '') => `<span class="${cls}" data-text-src="${esc(url)}" data-text-part="${esc(part)}">${textPart(textOf(url), part)}</span>`;
@@ -151,7 +154,6 @@
   const audio = new Audio();
   let nowPlaying = null;            // { round, gid, key, n, label, points, rank }
   const lastPlayed = {};            // ジャンルごとに最後に流した段階（一覧型の「現在の点数」）
-  const clipPlayed = new Set();     // 逆転：このセッションで流したクリップ
   let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 回答動画
   let subView = 'stages';           // 段階ヒント画面：'stages' / 'video'（解答動画）
   let showReport = false;
@@ -353,11 +355,13 @@
       <div class="legend-rows">${rows.map(([rk, color, unit]) => `<div class="legend-row"><span class="swatch ${tierClass(rk)}">${tp(rk)}点</span><span>${color}（${unit}）</span></div>`).join('')}</div>
       <div class="legend-note">減点方式：${deductNote}<br>点数方式：${pointsNote}</div></div>`;
   }
-  const WARN_LABEL = { unassigned: '割り当てなし', empty: '空のフォルダ', 'no-answer': '解答なし', 'stage-gap': '段階の抜け', 'mixed-media': '媒体の混在', 'multi-stem-note': 'メモの付け先なし', 'unknown-suffix': '不明な接尾辞', 'duplicate-key': 'キーの重複' };
+  const WARN_LABEL = { unassigned: '割り当てなし', empty: '空のフォルダ', 'no-answer': '解答なし', 'stage-gap': '段階の抜け', 'mixed-media': '媒体の混在', 'multi-stem-note': 'メモの付け先なし', 'unknown-suffix': '不明な接尾辞', 'duplicate-key': 'キーの重複',
+    'duplicate-name': '名前の重複', 'suffix-conflict': '接尾辞の食い違い', 'too-deep': '深すぎるフォルダ', unreadable: '一覧を読めない' };
+  const warnLabel = (type) => WARN_LABEL[type] || `その他（${type}）`;
   function reportPanel(rd) {
     const info = L.baseInfo ? L.baseInfo() : { base: L.base(), tried: [] };
     const tried = (info.tried || []).map((t) => `<tr><td><code>${esc(t.base)}/</code></td><td>${t.ok ? chip('使用可', 'done') : chip('不可')}</td><td>${esc(t.reason || '')}</td></tr>`).join('');
-    const warns = (rd.warnings || []).map((w) => `<tr><td>${chip(esc(WARN_LABEL[w.type] || w.type), w.type === 'empty' ? '' : 'ans')}</td><td class="path">${esc(w.path || w.genre || '')}</td><td>${esc(w.message || '')}</td></tr>`).join('');
+    const warns = (rd.warnings || []).map((w) => `<tr><td>${chip(esc(warnLabel(w.type)), w.type === 'empty' ? '' : 'ans')}</td><td class="path">${esc(w.path || w.genre || '')}</td><td>${esc(w.message || '')}</td></tr>`).join('');
     const nq = rd.genres.reduce((a, g) => a + g.questions.length, 0);
     return `<div class="report" data-report><div class="report-card">
       <div class="report-head"><span class="latin">LOAD REPORT</span><h2 class="report-title">読み込みレポート ─ ${esc(rd.name)}</h2><span class="spacer"></span>
@@ -507,19 +511,20 @@
       const prevOk = i === 0 || !!st.stages[q.stages[i - 1].n];
       const p = q.scoring === 'points' ? null : stagePoints(q, s.n);
       const text = `${stageName(q, s.n)}${p != null ? `（${p}点）` : ''}`;
-      const cls = `btn stage-btn ${tierClass(stageRank(q, s.n))} ${on ? 'revealed' : !on && prevOk ? 'next' : ''}`;
-      return `<div class="stage-item"><button class="${cls}" data-action="stage" data-n="${s.n}" ${!on && !prevOk ? 'disabled' : ''}>${on ? ICON.check() : prevOk ? ICON.eye() : ICON.lock()}${text}</button>
-        ${on ? `<button class="undo-btn" data-action="undo-stage" data-n="${s.n}" title="${stageName(q, s.n)}${q.stages.length > 1 ? '以降' : ''}を取り消す">${ICON.undo(12)}取り消し</button>` : ''}</div>`;
+      const locked = !on && (!prevOk || !!st.answer);   // 解答を出したあとは残りの段階を出さない
+      const cls = `btn stage-btn ${tierClass(stageRank(q, s.n))} ${on ? 'revealed' : !locked ? 'next' : ''}`;
+      return `<div class="stage-item"><button class="${cls}" data-action="stage" data-n="${s.n}" ${locked ? 'disabled' : ''} ${!on && st.answer ? 'title="解答を表示中は出せません"' : ''}>${on ? ICON.check() : !locked ? ICON.eye() : ICON.lock()}${text}</button>
+        ${on ? `<button class="undo-btn" data-action="undo-stage" data-n="${s.n}" ${st.answer ? 'disabled' : ''} title="${st.answer ? '先に解答を取り消してください' : `${stageName(q, s.n)}${q.stages.length > 1 ? '以降' : ''}を取り消す`}">${ICON.undo(12)}取り消し</button>` : ''}</div>`;
     }).join('') + counter;
   }
   function answerBar(g, q) {
     const a = q.answer;
     const text = answerTextHtml(q);
-    if (!text && !a.audio && !a.video) return '';
+    if (!text && !a.audio && !a.video && a.image) return '';   // 画像だけの解答は画像そのものが解答
     const playingAns = npIs(g, q.key, 'ans');
     return `<section class="answer">
       <span class="ans-lbl"><span class="latin red">ANSWER</span><span>解答</span></span>
-      <div class="ans-text on" data-answer-text>${text || `<span class="muted">${a.image ? '解答の画像を表示中' : ''}</span>`}</div>
+      <div class="ans-text on" data-answer-text>${text || `<span class="muted">${a.image ? '解答の画像を表示中' : '解答なし（ファイルがありません）'}</span>`}</div>
       ${a.audio ? `<button class="btn red lg" data-action="answer-audio">${playingAns ? (audio.paused ? ICON.play(18) + '再開' : ICON.stop(18) + '停止') : ICON.play(18) + '解答を再生'}</button>` : ''}
       ${a.video ? `<button class="btn red lg" data-action="answer-video">${ICON.video(18)}解答動画を再生</button>` : ''}
     </section>`;
@@ -545,7 +550,7 @@
         return `<div class="clip-cell"><button class="${cls}" data-action="list-play" data-key="${esc(q.key)}" data-n="${s.n}">${ic}${stageName(q, s.n)}${p != null ? `<small>${p}点</small>` : ''}${tag}</button>
           ${on ? `<button class="undo-btn" data-action="list-undo" data-key="${esc(q.key)}" data-n="${s.n}">${ICON.undo(12)}取り消し</button>` : ''}</div>`;
       }).join('');
-      const pad = Array.from({ length: Math.max(0, 3 - q.stages.length) }, () => '<div class="clip-cell"></div>').join('');
+      const pad = Array.from({ length: Math.max(0, TIER_POINTS.length - q.stages.length) }, () => '<div class="clip-cell"></div>').join('');
       const playingAns = np && np.key === q.key && np.n === 'ans';
       const ansText = st.answer ? (answerTextHtml(q, 'ans-inline') || '<span class="ans-inline muted">（答えのメモがありません）</span>') : '';
       const ansBtn = !st.answer
@@ -576,7 +581,7 @@
     const opened = shownNs(q, st).length;
     const tiles = q.stages.map((s) => {
       const open = !!st.stages[s.n]; const playing = np && np.n === s.n;
-      const played = clipPlayed.has(`${g.round}|${g.id}|${q.key}|${s.n}`);
+      const played = !!(st.clips && st.clips[s.n]);
       const ic = playing ? (audio.paused ? ICON.pause(18) : ICON.wave(20)) : played ? ICON.check(18) : ICON.play(16);
       return `<div class="clip-tile ${playing ? 'playing' : ''} ${played ? 'played' : ''} ${open ? 'open' : ''}">
         <button class="clip-play" data-action="clip-play" data-n="${s.n}" aria-label="${circled(s.n)}を再生"><span class="clip-num">${circled(s.n)}</span><span class="clip-ic">${ic}</span></button>
@@ -585,13 +590,18 @@
           : `<button class="chip ans" data-action="clip-answer" data-n="${s.n}">${ICON.eye(12)}答え</button>`}</div></div>`;
     }).join('');
     const sub = q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
+    // メモに行が無い番号の答えを開いたときだけ、メモ全文を 1 回だけ出す（開く前に出すと他の番号の答えが見えてしまう）
+    const noteText = q.answer.textSrc ? textOf(q.answer.textSrc) : undefined;
+    const lines = typeof noteText === 'string' ? noteLines(noteText) : null;
+    const noteStrip = lines && q.stages.some((s) => st.stages[s.n] && lines[s.n] == null)
+      ? `<div class="clip-note" data-clip-note><span class="clip-note-lbl">メモ</span><div class="clip-note-body">${textSpan(q.answer.textSrc, 'all')}</div></div>` : '';
     const rows = Math.ceil(q.stages.length / 5);
     render({
       header: quizHead(g, q, chip('逆転') + levelChip(q))
         + `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`
         + `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`,
       cls: 'clips',
-      main: `<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
+      main: `${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
       footer: `${btnBack(genreHref(g))}
         <button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
@@ -702,7 +712,6 @@
           if (npIs(g, tq.key)) stopAudio();
           { const v = videoOnStage(); if (v) v.pause(); }
           P.resetQ(r, g.id, tq.key);
-          [...clipPlayed].forEach((k) => { if (k.startsWith(`${r}|${g.id}|${tq.key}|`)) clipPlayed.delete(k); });
           subView = 'stages';
           toast(`${tq.label} をリセットしました`); rerender();
         }
@@ -722,7 +731,7 @@
         break;
       }
       case 'undo-stage':
-        if (!q) break;
+        if (!q || qst(g, q).answer) break;      // 解答を出している間は段階を取り消せない（先に undo-answer）
         if (npIs(g, q.key) && typeof nowPlaying.n === 'number' && nowPlaying.n >= n) stopAudio();
         P.undoStage(r, g.id, q.key, n); rerender();
         break;
@@ -771,8 +780,7 @@
       /* 逆転 */
       case 'clip-play': {
         if (!q) break;
-        clipPlayed.add(`${r}|${g.id}|${q.key}|${n}`);
-        P.patch(r, g.id, q.key, { played: true });
+        P.markClipPlayed(r, g.id, q.key, n);
         playStage(g, q, n, circled(n)); rerender();
         break;
       }

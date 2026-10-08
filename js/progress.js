@@ -1,8 +1,9 @@
 /* 出題の進捗（DOM に依存しない。Node のテストからも new Function で読み込める）
  *
  * localStorage['hasu-quiz-progress-v3'] =
- *   { [round]: { [genreId]: { [key]: { stages: { [n]: true }, answer: bool, played: bool, done: bool } } } }
+ *   { [round]: { [genreId]: { [key]: { stages: { [n]: true }, clips?: { [n]: true }, answer: bool, played: bool, done: bool } } } }
  *   stages … 出したヒントの段階番号（1 = ①）。逆転（clips）では「その番号の答えを開いた」
+ *   clips  … 逆転で流したクリップの番号（markClipPlayed。再読み込みしても済の印が残る。流したことが無ければ無い）
  *   answer … 解答を表示した／回答動画を再生した
  *   played … 何かを再生した（対動画の問題動画、逆転のクリップ）
  *   done   … 手動で出題済にした
@@ -40,6 +41,7 @@
     if (!a) return b;
     if (!b) return a;
     const out = { stages: Object.assign({}, a.stages, b.stages) };
+    if (a.clips || b.clips) out.clips = Object.assign({}, a.clips, b.clips);
     ['answer', 'played', 'done'].forEach((f) => { if (a[f] || b[f]) out[f] = true; });
     return out;
   }
@@ -160,7 +162,10 @@
 
   function get(r, g, k) {
     const e = ((state[r] || {})[g] || {})[k];
-    return e ? Object.assign({}, e, { stages: Object.assign({}, e.stages) }) : { stages: {} };
+    if (!e) return { stages: {} };
+    const out = Object.assign({}, e, { stages: Object.assign({}, e.stages) });
+    if (isObj(e.clips)) out.clips = Object.assign({}, e.clips);
+    return out;
   }
   function put(r, g, k, e) {
     state[r] = state[r] || {};
@@ -179,12 +184,15 @@
   }
   // 段階 n だけを取り消す（音声の一覧型・逆転：順番が無い）
   function clearStage(r, g, k, n) { const e = get(r, g, k); delete e.stages[n]; return put(r, g, k, e); }
+  // 逆転でクリップ n を流した：番号を覚え（再読み込み後も済の印が残る）、問題を「出題中」にする（played）
+  function markClipPlayed(r, g, k, n) { const e = get(r, g, k); e.clips = Object.assign({}, e.clips, { [n]: true }); e.played = true; return put(r, g, k, e); }
   function setAnswer(r, g, k, on) { return patch(r, g, k, { answer: !!on }); }
   function resetQ(r, g, k) { if (state[r] && state[r][g]) { delete state[r][g][k]; save(); } }
   function resetRound(r) { delete state[r]; save(); }
 
   /* ---------- 判定 ---------- */
   const revealed = (st) => (st && isObj(st.stages) ? Object.keys(st.stages).filter((n) => st.stages[n]).map(Number).sort((a, b) => a - b) : []);
+  const playedClips = (st) => (st && isObj(st.clips) ? Object.keys(st.clips).filter((n) => st.clips[n]).map(Number).sort((a, b) => a - b) : []);
   const isStarted = (st) => !!(st && (st.done || st.answer || st.played || revealed(st).length));
   // 段階ヒント・逆転：解答を出したか手動で済。対動画：回答動画を再生したか手動で済
   // eslint-disable-next-line no-unused-vars
@@ -195,8 +203,8 @@
 
   root.QuizProgress = {
     KEY, OLD_KEY,
-    load, save, get, patch, revealStage, undoStage, clearStage, setAnswer, resetQ, resetRound, resolveV2Pairs,
-    revealed, isStarted, isDone, countStarted, countDone,
+    load, save, get, patch, revealStage, undoStage, clearStage, markClipPlayed, setAnswer, resetQ, resetRound, resolveV2Pairs,
+    revealed, playedClips, isStarted, isDone, countStarted, countDone,
     state: () => state,
     migratedFromV2: () => migrated,
     _internal: { migrateV2, migrateKey, migrateEntry, mergeEntry, v2PairKeys },

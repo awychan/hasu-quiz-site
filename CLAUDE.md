@@ -43,5 +43,5 @@ Token discipline: follow /Users/awychan/Documents/Claude/Projects/CLAUDE_CODE_PL
 1. Done: Screens + progress store + media playback (2026-09-25)
 2. Done: Folder-driven loading per spec シート5: round screen, loader, list generator (2026-10-01)
 3. Done: Organizers filled the Drive folder (第1回, 2026-10-08); synced via `drive` symlink (Drive for desktop)
-4. In progress: loader v3 + screens for the real folder structure (decisions and per-session tasks in PLAN.md). On `feat/v3`: session 1 (prep) and 2 (loader v3, `check_media`, tests) done; 3 (screens, progress v3) in progress; 4 (real-data run-through, docs) pending
+4. Done (2026-10-08, branch `feat/v3`, PR pending): loader v3 + screens for the real folder structure (decisions and per-session tasks in PLAN.md); sessions 1-4 done, real-data QA in Chrome passed; remaining: visible-window playback check, `fetch_fonts.py` once online, re-run `check_media` after the organizers rename folders
 5. 会場準備 (offline pinning, network-off rehearsal, backup `media/` copy; checklist in README) and open items: 逆転 rule, 級の点数 confirmation, night mode

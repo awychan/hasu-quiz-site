@@ -193,3 +193,52 @@ test('isStarted／isDone／countStarted', () => {
   assert.equal(P.countStarted(genre, {}), 0, 'store を渡せばそれを数える');
   assert.equal(P.countDone(genre), 1);
 });
+
+test('markClipPlayed：流したクリップの番号が保存され、再読み込みしても残る', () => {
+  const P = loadProgress();
+  const st = memStorage();
+  P.load(st);
+  assert.deepEqual(P.playedClips(P.get('R', 'G', 'c')), []);
+  P.markClipPlayed('R', 'G', 'c', 3);
+  P.markClipPlayed('R', 'G', 'c', 12);
+  P.markClipPlayed('R', 'G', 'c', 3);   // 同じ番号をもう一度流しても 1 つ
+  const e = P.get('R', 'G', 'c');
+  assert.deepEqual(P.playedClips(e), [3, 12]);
+  assert.equal(e.played, true, '出題中の判定は従来どおり played');
+  assert.deepEqual(JSON.parse(st.getItem('hasu-quiz-progress-v3')).R.G.c.clips, { 3: true, 12: true });
+  // 別の読み込み（再読み込み相当）
+  const P2 = loadProgress();
+  P2.load(st);
+  assert.deepEqual(P2.playedClips(P2.get('R', 'G', 'c')), [3, 12]);
+  const genre = { round: 'R', id: 'G', questions: [{ key: 'c', mode: 'clips' }] };
+  assert.equal(P2.countStarted(genre), 1, '1 つでも流せば出題済の数に入る');
+  assert.equal(P2.isDone(P2.get('R', 'G', 'c'), genre.questions[0]), false, '答えを開くまでは「済」ではない');
+});
+
+test('clips の記録は答えの開閉・全部隠す・取り消しで消えず、resetQ で消える', () => {
+  const P = loadProgress();
+  P.load(memStorage());
+  P.markClipPlayed('R', 'G', 'c', 2);
+  P.revealStage('R', 'G', 'c', 2);
+  P.clearStage('R', 'G', 'c', 2);
+  P.undoStage('R', 'G', 'c', 1);
+  P.patch('R', 'G', 'c', { stages: {} });   // すべての答えを隠す
+  P.setAnswer('R', 'G', 'c', true);
+  assert.deepEqual(P.playedClips(P.get('R', 'G', 'c')), [2]);
+  P.resetQ('R', 'G', 'c');
+  assert.deepEqual(P.playedClips(P.get('R', 'G', 'c')), []);
+  assert.deepEqual(P.get('R', 'G', 'c'), { stages: {} });
+});
+
+test('get は clips もコピーで返す／流したことが無ければ clips は付かない', () => {
+  const P = loadProgress();
+  P.load(memStorage());
+  P.revealStage('R', 'G', 'k', 1);
+  assert.equal('clips' in P.get('R', 'G', 'k'), false);
+  P.markClipPlayed('R', 'G', 'k', 1);
+  const e = P.get('R', 'G', 'k'); e.clips[9] = true;
+  assert.deepEqual(P.playedClips(P.get('R', 'G', 'k')), [1]);
+  // 同じ問題の 2 つの記録を合わせるときも clips は和
+  const m = P._internal.mergeEntry({ stages: {}, clips: { 1: true } }, { stages: {}, clips: { 4: true }, played: true });
+  assert.deepEqual(m, { stages: {}, clips: { 1: true, 4: true }, played: true });
+});
