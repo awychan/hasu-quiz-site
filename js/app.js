@@ -388,7 +388,7 @@
       main: `<div class="player">
           <div class="player-top"><span class="pill-solid">${ICON.video(14)}${modeLabel}</span><span class="player-note" data-note>${esc(shown)}</span></div>
           <video data-video ${src ? `src="${esc(src)}"` : ''} playsinline preload="metadata"></video>
-          <div class="bigplay-wrap" data-bigplay><button class="bigplay" data-action="video-toggle" aria-label="再生">${ICON.play(38)}</button><span class="bigplay-lbl">クリックで再生</span></div>
+          <div class="bigplay-wrap" data-bigplay><button class="bigplay" data-action="video-toggle" aria-label="再生"><span class="bigplay-circle">${ICON.play(38)}</span><span class="bigplay-lbl">クリックで再生</span></button></div>
           ${progressBar('dark')}
         </div>`,
       footer: `${btnBack(genreHref(g))}
@@ -410,6 +410,7 @@
     const v = stage.querySelector('[data-video]'); if (!v) return;
     const playing = !v.paused && !v.ended;
     const wrap = stage.querySelector('[data-bigplay]'); if (wrap) wrap.hidden = playing;
+    stage.querySelector('.player')?.classList.toggle('is-playing', playing);
     const pillEl = stage.querySelector('[data-video-pill]');
     if (pillEl) pillEl.innerHTML = (playing ? ICON.play(14) : ICON.pause(14)) + (videoMode === 'a' ? '回答動画' : '問題動画') + (playing ? ' 再生中' : ' 停止中');
     updateProgressUI();
