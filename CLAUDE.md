@@ -4,7 +4,7 @@ Token discipline: follow /Users/awychan/Documents/Claude/Projects/CLAUDE_CODE_PL
 
 ## Stack
 - Static site, no build step, no dependencies: `index.html`, `css/style.css`, `js/config.js` (event title, mediaBase), `js/loader.js` (folder tree → rounds/genres/questions), `js/app.js` (router + store + screens).
-- Content is folder-driven (spec シート5): `media/<round>/<カテゴリ_ジャンル名_方式>/<第N問 | 初級/中級/上級>/<files>`; `_ver1/2/3` = 3/2/1点, `_問題/_回答` = video pair / answer image, txt = lyrics. Naming rules in `media/README.md`. The loader reads `読み込み用ファイル.txt` per round (made by `scripts/make_list.py`) or falls back to the Python server's directory listing.
+- Content is folder-driven, loader v3 (`feat/v3`): `<base>/<round>/<genre>/[<group>/][初級|中級|上級/][第N問|問題N[_方式]/]<files>`; stages `_①…⑳` / `_verN` (5/2/1 via `config.tierPoints`), answers `_解答|回答|正解|答え`, pairs `_問題`+`_正解`, note `_<答え>.txt` = answer text. `QuizLoader.parse(round, files)` is pure → one question shape `{key, mode: staged|pair|clips, format, stages, answer, points…}`. Naming rules in `media/README.md`. The loader reads `読み込み用ファイル.txt` per round (made by `scripts/make_list.py`, lists `folder/` lines too) or falls back to the server's directory listing; bases from `config.mediaBases` (`drive` link → `media`).
 - Hash routing: `#/` round select, `#/<round>` TOP, `#/<round>/<genreFolder>` genre screen, `#/<round>/<genreFolder>/<key>` quiz. Keys: `q1` (audio/lyrics/image), `L2-1` (video: level points + id). Components are URL-encoded.
 - Progress in `localStorage` key `hasu-quiz-progress-v2`: `{ [round]: { [genreFolder]: { [key]: { clips:{3,2,1}, lyrics:{3,2,1}, answer, played, hint, done } } } }`.
 - Script/style URLs carry `?v=YYYYMMDD` in `index.html`; bump it when shipping changes so browsers drop cached copies.
@@ -13,7 +13,9 @@ Token discipline: follow /Users/awychan/Documents/Claude/Projects/CLAUDE_CODE_PL
 ## Commands
 - Run: `python3 -m http.server 8765 --bind 127.0.0.1` (also `.claude/launch.json` → `quiz-site`), open http://127.0.0.1:8765/
 - Syntax check: `node --check js/app.js js/loader.js`
-- Generate list files: `python3 scripts/make_list.py` (optional with the Python server)
+- Generate list files: `python3 scripts/make_list.py` (optional with the Python server; refuses to write into Drive)
+- Loader tests: `node --test` (runs `tests/*.test.mjs`, dummy names only)
+- Real-data check: `node scripts/check_media.mjs --base drive --round 第1回` or `--url http://127.0.0.1:8765` (output contains answers: never paste it into the repo/PRs; `tests/expected.*.json` is gitignored)
 - Local sample media for testing: generate a `media/第1回/…` tree with WAV/PNG/txt placeholders (see git history of this session); `media/` is gitignored
 
 ## Conventions
