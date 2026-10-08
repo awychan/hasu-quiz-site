@@ -22,7 +22,11 @@
   const nfc = (s) => String(s == null ? '' : s).normalize('NFC');
   const norm = (s) => nfc(s).replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
   const SEP = '[_ 　-]';
-  const trimSep = (s) => s.replace(new RegExp('^' + SEP + '+|' + SEP + '+$', 'g'), '');
+  const isSep = (c) => c === '_' || c === ' ' || c === '　' || c === '-';
+  // 前後の区切りを落とす。正規表現の「SEP+$」は長い区切りの列で何度も戻って遅くなるので、1 回の走査で行う
+  function trimSep(s) { let a = 0, b = s.length; while (a < b && isSep(s[a])) a++; while (b > a && isSep(s[b - 1])) b--; return s.slice(a, b); }
+  // 末尾の数字（なければ null）。/(\d+)$/ の代わりの線形走査
+  function tailNumber(s) { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) >= 48 && s.charCodeAt(i - 1) <= 57) i--; return i < s.length ? parseInt(s.slice(i), 10) : null; }
   const extOf = (name) => { const m = name.match(/\.([^./]+)$/); return m ? m[1].toLowerCase() : ''; };
   const dropExt = (name) => name.replace(/\.[^./]+$/, '');
   const kindOfFile = (name) => AUDIO_EXT.test(name) ? 'audio' : VIDEO_EXT.test(name) ? 'video' : IMAGE_EXT.test(name) ? 'image' : TEXT_EXT.test(name) ? 'text' : null;
@@ -61,18 +65,23 @@
       return entries;
     } catch (e) { return null; }
   }
-  // フォルダ一覧をたどる。訪れたフォルダは「名前/」の行で返す（空フォルダを警告に出すため）
+  // フォルダ一覧をたどる。訪れたフォルダは「名前/」の行で返す（空フォルダを警告に出すため）。
+  // 読めなかった所は印の行で返す：「フォルダ/#unreadable」＝一覧を取得できなかった、「フォルダ/#too-deep」＝深さの上限でその中のフォルダを読んでいない
+  // （印の行も「/」で終わらないのでファイル扱いの古いコードにも壊れない。parse() が too-deep / unreadable の警告にする）
+  const MARK_TOO_DEEP = '#too-deep', MARK_UNREADABLE = '#unreadable';
   async function walk(dir, depth, base) {
     const entries = await fetchListing(dir, base);
     if (!entries) return null;
     const out = [], dirs = [];
+    let tooDeep = false;
     entries.forEach((e) => {
       const p = dir ? dir + '/' + e.name : e.name;
-      if (e.isDir) { if (!hiddenDir(e.name) && depth > 0) dirs.push(p); }
+      if (e.isDir) { if (hiddenDir(e.name)) return; if (depth > 0) dirs.push(p); else tooDeep = true; }
       else if (!e.name.startsWith('.')) out.push(p);
     });
     const subs = await Promise.all(dirs.map((d) => walk(d, depth - 1, base)));
-    subs.forEach((s, i) => { out.push(dirs[i] + '/'); if (s) out.push(...s); });
+    subs.forEach((s, i) => { out.push(dirs[i] + '/'); if (s) out.push(...s); else out.push(dirs[i] + '/' + MARK_UNREADABLE); });
+    if (tooDeep) out.push((dir ? dir + '/' : '') + MARK_TOO_DEEP);
     return out;
   }
 
@@ -125,6 +134,14 @@
   }
   const baseInfo = () => ({ base: BASE, tried: tried.map((t) => Object.assign({}, t)) });
 
+  // 行の先頭が prefix（NFC で比べる）なら、それを取り除いた残りを返す。NFD の行は元の文字数が NFC の prefix より長いので、長さではなく NFC が一致する位置で切る。
+  // 残りは元の綴りのまま（URL は元の名前で作るため）。合わなければ null
+  function stripPrefix(line, prefix) {
+    const p = nfc(prefix);
+    if (!nfc(line).startsWith(p)) return null;
+    for (let k = Math.min(p.length, line.length); k <= line.length; k++) if (nfc(line.slice(0, k)) === p) return line.slice(k);
+    return nfc(line).slice(p.length);
+  }
   async function roundFiles(round) {
     const txt = await fetchText(round + '/' + LIST);
     if (txt != null) {
@@ -132,9 +149,9 @@
       txt.split(/\r?\n/).forEach((l) => {
         l = cleanLine(l);
         if (!l || l.startsWith('#')) return;
-        if (nfc(l).startsWith(nfc(round) + '/')) l = l.slice(round.length + 1);
-        else if (nfc(l).startsWith(nfc(BASE + '/' + round) + '/')) l = l.slice(BASE.length + round.length + 2);
-        files.push(l);
+        let rest = stripPrefix(l, round + '/');
+        if (rest == null) rest = stripPrefix(l, BASE + '/' + round + '/');
+        files.push(rest != null ? rest : l);
       });
       return { files, source: 'list' };
     }
@@ -155,25 +172,44 @@
   const scoringOfLabel = (label) => /点数/.test(label) ? 'points' : /減点|逆転/.test(label) ? 'deduct' : null;
 
   // 問題フォルダ：第N問 / N / 問題N、続けて _減点方式・_点数方式・_逆転・_N点（組み合わせ可）
+  // 接尾辞が食い違うときは 並びに関係なく 逆転 ＞ 減点方式 ＞ 点数方式・N点 の順に採り、conflict に理由を入れる（警告 suffix-conflict の元）
+  //  ・逆転は減点＋clips。点数方式／N点とは両立しない　・減点方式と 点数方式／N点 も両立しない　・N点が複数あるときは最初のもの
   function parseQuestionFolder(name) {
     const s = norm(name).trim();
     const m = s.match(/^(?:第)?(\d+)問?(?=$|[_ 　-])/) || s.match(/^問題(\d+)(?=$|[_ 　-])/);
     if (!m) return null;
     // marked：「第」「問」が付いている（第N問・N問・問題N）。裸の「N」「N_…」は marked でない
-    const out = { id: parseInt(m[1], 10), form: /^問題/.test(s) ? 'mondai' : 'dai', marked: /[第問]/.test(m[0]), scoring: null, reverse: false, fixedPoints: null, suffixLabel: '', unknown: [] };
+    const out = { id: parseInt(m[1], 10), form: /^問題/.test(s) ? 'mondai' : 'dai', marked: /[第問]/.test(m[0]), scoring: null, reverse: false, fixedPoints: null, suffixLabel: '', unknown: [], conflict: [] };
     const rest = trimSep(s.slice(m[0].length));
     if (!rest) return out;
-    const labels = [];
+    const found = []; // { cls: 'reverse' | 'deduct' | 'points' | 'fixed', label, value? }
     rest.split(new RegExp(SEP + '+')).filter(Boolean).forEach((part) => {
       const pm = part.match(/^(\d+)点$/);
-      if (pm) { out.fixedPoints = parseInt(pm[1], 10); labels.push(part); if (!out.scoring) out.scoring = 'points'; }
-      else if (/逆転/.test(part)) { out.reverse = true; out.scoring = 'deduct'; labels.push('逆転'); }
-      else if (/減点/.test(part)) { out.scoring = 'deduct'; labels.push(part); }
-      else if (/点数/.test(part)) { out.scoring = 'points'; labels.push(part); }
+      if (pm) found.push({ cls: 'fixed', label: part, value: parseInt(pm[1], 10) });
+      else if (/逆転/.test(part)) found.push({ cls: 'reverse', label: '逆転' });
+      else if (/減点/.test(part)) found.push({ cls: 'deduct', label: part });
+      else if (/点数/.test(part)) found.push({ cls: 'points', label: part });
       else out.unknown.push(part);
     });
-    if (out.unknown.length && !out.scoring) out.scoring = 'deduct';
-    out.suffixLabel = labels.join('_');
+    const has = (...cls) => found.some((f) => cls.includes(f.cls));
+    out.reverse = has('reverse');
+    if (has('reverse', 'deduct')) out.scoring = 'deduct';
+    else if (has('points', 'fixed')) out.scoring = 'points';
+    else if (out.unknown.length) out.scoring = 'deduct';
+    const keep = out.scoring === 'deduct' ? ['reverse', 'deduct'] : ['points', 'fixed'];
+    const loser = found.filter((f) => !keep.includes(f.cls));
+    if (has('reverse', 'deduct') && has('points', 'fixed')) {
+      out.conflict.push(`${out.reverse ? '逆転' : '減点方式'}と ${loser.map((f) => f.label).join('・')} は両立しません → ${out.reverse ? '逆転（減点）' : '減点方式'}として読みます`);
+    }
+    const fixeds = found.filter((f) => f.cls === 'fixed');
+    if (out.scoring === 'points' && fixeds.length) {
+      out.fixedPoints = fixeds[0].value;
+      if (new Set(fixeds.map((f) => f.value)).size > 1) out.conflict.push(`点数が複数あります（${fixeds.map((f) => f.label).join('・')}）→ 最初の ${fixeds[0].label} を使います`);
+    }
+    const shown = [];
+    let seenFixed = false;
+    found.forEach((f) => { if (!keep.includes(f.cls)) return; if (f.cls === 'fixed') { if (seenFixed) return; seenFixed = true; } shown.push(f.label); });
+    out.suffixLabel = shown.join('_');
     return out;
   }
 
@@ -189,26 +225,71 @@
   }
 
   // ファイル名から印を 1 つだけ取る：答えの語 or 問題側の語 ＞ 段階（①〜⑳・㉑〜㉟・_verN）
-  const ANSWER_END = new RegExp(SEP + '*(解答|回答|正解|答え|answer)$', 'i');
-  const ANSWER_START = new RegExp('^(解答|回答|正解|答え|answer)' + SEP + '*', 'i');
-  const QUESTION_END = new RegExp(SEP + '*(問題|question)$', 'i');
-  const VER_RE = new RegExp('(?:^|' + SEP + '+)ver(\\d{1,2})(?!\\d)', 'i');
-  function classify(fileName) {
-    const base = dropExt(norm(fileName));
-    let m;
-    if ((m = base.match(ANSWER_END)) || (m = base.match(ANSWER_START))) return { marker: 'answer', n: null, stem: trimSep(base.replace(m[0], '')) };
-    if ((m = base.match(QUESTION_END))) return { marker: 'question', n: null, stem: trimSep(base.replace(m[0], '')) };
-    let idx = -1, n = null;
-    for (let i = base.length - 1; i >= 0; i--) {
-      const c = base.charCodeAt(i);
-      if (c >= 0x2460 && c <= 0x2473) { idx = i; n = c - 0x2460 + 1; break; }
-      if (c >= 0x3251 && c <= 0x325F) { idx = i; n = c - 0x3251 + 21; break; }
+  // 正規表現（[区切り]*語$ や (^|[区切り]+)ver\d+）は長い区切りの列で何度も戻るので、前後からの 1 回の走査で書いている
+  const ANSWER_WORDS = ['解答', '回答', '正解', '答え', 'answer'];
+  const QUESTION_WORDS = ['問題', 'question'];
+  // 末尾の語（前の区切りごと）。strict のときは語の前が区切りか名前の先頭でなければ印にしない。見つかれば幹の終わりの位置、なければ -1
+  function tailWord(base, words, strict) {
+    for (const w of words) {
+      const at = base.length - w.length;
+      if (at < 0 || base.slice(at).toLowerCase() !== w) continue;
+      let cut = at; while (cut > 0 && isSep(base[cut - 1])) cut--;
+      if (strict && cut === at && at > 0) continue;
+      return cut;
     }
-    if (idx >= 0) return { marker: 'stage', n, stem: trimSep(base.slice(0, idx) + base.slice(idx + 1)) };
-    if ((m = base.match(VER_RE))) return { marker: 'stage', n: parseInt(m[1], 10), stem: trimSep(base.slice(0, m.index) + base.slice(m.index + m[0].length)) };
+    return -1;
+  }
+  // 先頭の語（後ろの区切りごと）。見つかれば幹の始まりの位置、なければ -1
+  function headWord(base, words) {
+    for (const w of words) {
+      if (base.length < w.length || base.slice(0, w.length).toLowerCase() !== w) continue;
+      let e = w.length; while (e < base.length && isSep(base[e])) e++;
+      return e;
+    }
+    return -1;
+  }
+  // 「[区切り]+ver1」「ver12」（名前の先頭か区切りの直後で、数字は 1〜2 桁）。見つかれば { index（前の区切りの頭）, end, n }
+  function findVer(base) {
+    for (let p = 0; p + 3 < base.length; p++) {
+      if (p > 0 && !isSep(base[p - 1])) continue;
+      if (base.slice(p, p + 3).toLowerCase() !== 'ver') continue;
+      let e = p + 3; while (e < base.length && e - p - 3 < 3 && base.charCodeAt(e) >= 48 && base.charCodeAt(e) <= 57) e++;
+      const d = e - p - 3;
+      if (d < 1 || d > 2) continue;
+      let s = p; while (s > 0 && isSep(base[s - 1])) s--;
+      return { index: s, end: e, n: parseInt(base.slice(p + 3, e), 10) };
+    }
+    return null;
+  }
+  // strict：.txt に使う。答え／問題／段階の印は「名前の先頭、または _ 空白 - の直後」にあるときだけ印にする（曲名の途中の ① や末尾の「答え」は印にしない）。
+  // 先頭が「_」の .txt は段階にしない（_曲名.txt はメモ）
+  function classify(fileName, strict) {
+    const base = dropExt(norm(fileName));
+    let cut;
+    if ((cut = tailWord(base, ANSWER_WORDS, strict)) >= 0) return { marker: 'answer', n: null, stem: trimSep(base.slice(0, cut)) };
+    if ((cut = headWord(base, ANSWER_WORDS)) >= 0) return { marker: 'answer', n: null, stem: trimSep(base.slice(cut)) };
+    if ((cut = tailWord(base, QUESTION_WORDS, strict)) >= 0) return { marker: 'question', n: null, stem: trimSep(base.slice(0, cut)) };
+    if (!(strict && fileName.startsWith('_'))) {
+      for (let i = base.length - 1; i >= 0; i--) {
+        const c = base.charCodeAt(i);
+        let n = null;
+        if (c >= 0x2460 && c <= 0x2473) n = c - 0x2460 + 1;
+        else if (c >= 0x3251 && c <= 0x325F) n = c - 0x3251 + 21;
+        if (n == null) continue;
+        if (strict && i > 0 && !isSep(base[i - 1])) continue;
+        return { marker: 'stage', n, stem: trimSep(base.slice(0, i) + base.slice(i + 1)) };
+      }
+      const v = findVer(base);
+      if (v) return { marker: 'stage', n: v.n, stem: trimSep(base.slice(0, v.index) + base.slice(v.end)) };
+    }
     return { marker: null, n: null, stem: trimSep(base) };
   }
-  const levelOf = (name) => { const k = norm(name).trim(); const rank = LEVELS[k]; return rank ? { label: k, rank, points: TIER_POINTS[rank - 1] != null ? TIER_POINTS[rank - 1] : null } : null; };
+  const levelOf = (name) => {
+    const k = norm(name).trim();
+    if (!Object.hasOwn(LEVELS, k)) return null; // 'constructor' などの継承プロパティは級ではない
+    const rank = LEVELS[k];
+    return rank ? { label: k, rank, points: TIER_POINTS[rank - 1] != null ? TIER_POINTS[rank - 1] : null } : null;
+  };
 
   /* ---------- 回の組み立て（純関数） ---------- */
   // files：回フォルダからの相対パス。末尾が「/」の行はフォルダ（空フォルダを見つけるため）
@@ -218,14 +299,25 @@
     const warnings = [];
     const warn = (list, type, path, message) => { const w = { type, path, message }; list.push(w); return w; };
 
-    // 木を作る（ノード：raw 名、照合名、子フォルダ、ファイル）
-    const root = { raw: roundName, name: round, dirs: new Map(), files: [], parent: null, segs: [] };
+    const relOf = (segs) => segs.map(nfc).join('/');
+    const srcOf = (segs) => u([roundName].concat(segs).join('/'), base);
+
+    // 木を作る（ノード：raw 名、照合名、子フォルダ、ファイル、読み込み時の警告 marks、中身を全部は読めていない印 incomplete）
+    const newNode = (raw, parent) => ({ raw, name: nfc(raw), dirs: new Map(), files: [], parent, segs: parent ? parent.segs.concat(raw) : [], marks: [], variants: new Set([nfc(raw)]), incomplete: false });
+    const root = newNode(roundName, null);
+    root.name = round;
     const nodeFor = (segs) => {
       let node = root;
       for (const s of segs) {
         const k = norm(s);
-        if (!node.dirs.has(k)) node.dirs.set(k, { raw: s, name: nfc(s), dirs: new Map(), files: [], parent: node, segs: node.segs.concat(s) });
-        node = node.dirs.get(k);
+        let child = node.dirs.get(k);
+        if (!child) { child = newNode(s, node); node.dirs.set(k, child); }
+        else if (!child.variants.has(nfc(s))) {
+          // 第1問 と 第１問 のように、照合名（全角数字を半角にしたもの）が同じ別名のフォルダ：1 つにまとめて読む
+          node.marks.push({ type: 'duplicate-name', path: relOf(child.segs), message: `同じ名前として読むフォルダが複数あります（「${[...child.variants].join('」「')}」と「${nfc(s)}」）→ 1 つにまとめて読みます` });
+          child.variants.add(nfc(s));
+        }
+        node = child;
       }
       return node;
     };
@@ -236,18 +328,34 @@
       const isDir = l.endsWith('/');
       const segs = l.split('/').filter(Boolean);
       if (!segs.length) return;
+      const last = segs[segs.length - 1];
+      // 印の行（walk() が出す）：「フォルダ/#too-deep」「フォルダ/#unreadable」
+      if (!isDir && (last === MARK_TOO_DEEP || last === MARK_UNREADABLE)) {
+        const ds = segs.slice(0, -1);
+        if (ds.some(hiddenDir)) return;
+        const node = nodeFor(ds);
+        node.incomplete = true;
+        const type = last === MARK_TOO_DEEP ? 'too-deep' : 'unreadable';
+        if (!node.marks.some((m) => m.type === type)) {
+          node.marks.push({ type, path: relOf(node.segs) || round, message: type === 'too-deep' ? 'フォルダが深すぎて、この中のフォルダは読んでいません（ジャンルの下は 3 段まで）' : 'フォルダの一覧を取得できず、中身を読んでいません' });
+        }
+        return;
+      }
       const dirSegs = isDir ? segs : segs.slice(0, -1);
       if (dirSegs.some(hiddenDir)) return;
       const node = nodeFor(dirSegs);
       if (isDir) return;
-      const name = segs[segs.length - 1];
+      const name = last;
       if (hiddenFile(name)) return;
-      if (node.files.some((f) => norm(f.raw) === norm(name))) return;
+      const same = node.files.find((f) => norm(f.raw) === norm(name));
+      if (same) {
+        if (same.name !== nfc(name)) node.marks.push({ type: 'duplicate-name', path: relOf(segs), message: `同じ名前として読むファイルが複数あります（「${same.name}」と「${nfc(name)}」）→ 後のものは読みません` });
+        return;
+      }
       node.files.push({ raw: name, name: nfc(name), norm: norm(name), segs });
       fileCount++;
     });
-    const relOf = (segs) => segs.map(nfc).join('/');
-    const srcOf = (segs) => u([roundName].concat(segs).join('/'), base);
+    root.marks.forEach((m) => warn(warnings, m.type, m.path, m.message));
 
     // 回フォルダ直下のファイルは割り当て先が無い
     root.files.forEach((f) => warn(warnings, 'unassigned', relOf(f.segs), 'ジャンルのフォルダの外にあるファイル'));
@@ -264,14 +372,15 @@
       const gw = genre.warnings;
       const usedKeys = new Map();
 
-      const emptyCheck = (node) => warn(gw, 'empty', relOf(node.segs), '空のフォルダ（画面には出しません）');
+      // 読めなかった所（too-deep / unreadable）は「空」ではない：その警告だけを出す
+      const emptyCheck = (node) => { if (!node.incomplete) warn(gw, 'empty', relOf(node.segs), '空のフォルダ（画面には出しません）'); };
 
       // 葉（媒体ファイルを直接持つフォルダ）を処理する
       const processLeaf = (node, ctx) => {
         const notes = [], items = [];
         node.files.forEach((f) => {
           const kind = kindOfFile(f.raw);
-          const c = classify(f.raw);
+          const c = classify(f.raw, kind === 'text');
           if (kind === 'text' && c.marker !== 'stage' && c.marker !== 'answer') notes.push(f);
           else if (kind) items.push(Object.assign({ kind }, f, c));
           else warn(gw, 'unassigned', relOf(f.segs), '媒体として読めない拡張子');
@@ -287,18 +396,21 @@
         if (folderQ && folderQ.unknown.length) {
           warn(gw, 'unknown-suffix', relOf(node.segs), `問題フォルダの知らない接尾辞（${folderQ.unknown.join('・')}）→ 減点方式として読みます`);
         }
+        if (folderQ) folderQ.conflict.forEach((msg) => warn(gw, 'suffix-conflict', relOf(node.segs), `問題フォルダの接尾辞が食い違っています：${msg}`));
         if (stemList.length === 1) {
-          const tail = stemList[0].stem.match(/(\d+)$/);
-          const id = folderQ ? folderQ.id : tail ? parseInt(tail[1], 10) : 1;
+          const tail = tailNumber(stemList[0].stem);
+          const id = folderQ ? folderQ.id : tail != null ? tail : 1;
           const label = folderQ && folderQ.form === 'dai' ? `第${id}問` : `問題${id}`;
           buildQuestion(stemList[0], { node, ctx, id, label, folderQ, notes, multi: false });
         } else {
           if (notes.length) warn(gw, 'multi-stem-note', relOf(node.segs), `幹が ${stemList.length} 個あるフォルダのメモはどの問題にも付けません`);
-          const tails = stemList.map((s) => { const m = s.stem.match(/(\d+)$/); return m ? parseInt(m[1], 10) : null; });
+          const tails = stemList.map((s) => tailNumber(s.stem));
           const useTails = tails.every((t) => t != null) && new Set(tails).size === tails.length;
           stemList.forEach((s, i) => {
             const id = useTails ? tails[i] : i + 1;
-            buildQuestion(s, { node, ctx, id, label: `問題${id}`, folderQ: folderQ ? Object.assign({}, folderQ, { id: null }) : null, notes: [], multi: true });
+            // 番号付きの問題フォルダ（第5問 など）の中に幹が複数：キーは「<フォルダの番号>-<何番目か>」（他の問題フォルダの 1, 2 とぶつけない）
+            const keyId = folderQ ? `${folderQ.id}-${i + 1}` : null;
+            buildQuestion(s, { node, ctx, id, keyId, label: `問題${id}`, folderQ: folderQ ? Object.assign({}, folderQ, { id: null }) : null, notes: [], multi: true });
           });
         }
       };
@@ -372,7 +484,7 @@
         if (kind && answer.text && norm(kind) === norm(answer.text)) kind = null; // 答えと同じ文字はカードに出さない
 
         const group = o.ctx.groups.length ? o.ctx.groups.join('/') : null;
-        let key = [group, level ? level.label : null, String(o.id)].filter((x) => x != null).join('~');
+        let key = [group, level ? level.label : null, String(o.keyId != null ? o.keyId : o.id)].filter((x) => x != null).join('~');
         if (usedKeys.has(key)) {
           let i = 2; while (usedKeys.has(`${key}#${i}`)) i++;
           warn(qw, 'duplicate-key', leafPath, `問題の番号が重複（${key}）→ ${key}#${i} として読みます`);
@@ -393,6 +505,7 @@
 
       // ジャンルから葉までたどる。級の名前なら level、問題フォルダ（questionFolderOf）でなければ group
       const visit = (node, ctx) => {
+        node.marks.forEach((m) => warn(gw, m.type, m.path, m.message));
         if (node.files.length) processLeaf(node, ctx);
         else if (!node.dirs.size) { emptyCheck(node); return; }
         const lvOrder = (n) => { const lv = levelOf(n.raw); return lv ? -lv.rank : 0; };
@@ -403,7 +516,6 @@
           if (lv) next = { groups: ctx.groups, level: lv };
           else if (questionFolderOf(child.raw, child.dirs.size > 0)) next = ctx;
           else next = { groups: ctx.groups.concat(norm(child.raw)), level: ctx.level };
-          if (!child.files.length && !child.dirs.size) { emptyCheck(child); return; }
           visit(child, next);
         });
       };
@@ -480,6 +592,6 @@
   window.QuizLoader = {
     discoverRounds, loadRound, loadText, base: () => BASE, baseInfo, LIST, parse,
     // 検査用（scripts/check_media.mjs・tests）
-    _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS },
+    _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, levelOf, stripPrefix, trimSep, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS, MARK_TOO_DEEP, MARK_UNREADABLE },
   };
 })();
