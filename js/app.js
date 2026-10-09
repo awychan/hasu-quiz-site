@@ -25,6 +25,10 @@
     if (src) console.warn('読み込めません:', fileName(src));
     return `${what ? `${what}を` : ''}読み込めません（Drive 未ダウンロードの可能性）`;
   };
+  // play() が拒否されたとき：自動再生の制限（NotAllowedError）はファイルの問題ではないので別の文言。
+  // 読み込みの失敗（NotSupportedError など）は要素の 'error' イベント側で Drive の文言を出すので、ここでは何もしない
+  const AUTOPLAY_MSG = '再生できません（ブラウザが自動再生を止めました）。画面をクリックしてから再生してください';
+  const isAutoplayBlock = (err) => !!(err && err.name === 'NotAllowedError');
   // 段階番号 → ①…⑳、㉑…㉟
   const circled = (n) => (n >= 1 && n <= 20 ? String.fromCharCode(0x2460 + n - 1) : n >= 21 && n <= 35 ? String.fromCharCode(0x3251 + n - 21) : `(${n})`);
   const circledNum = (ch) => { const c = ch.charCodeAt(0); return c >= 0x2460 && c <= 0x2473 ? c - 0x2460 + 1 : c >= 0x3251 && c <= 0x325F ? c - 0x3251 + 21 : null; };
@@ -66,6 +70,9 @@
   const catIcon = (g, s) => { const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
 
   /* ---------------- 進捗（js/progress.js） ---------------- */
+  // 保存できなかったら 1 回だけ知らせる（記録は画面の中だけに残り、閉じると消える）
+  let saveFailShown = false;
+  P.onSaveFail(() => { if (saveFailShown) return; saveFailShown = true; toast('進捗を保存できませんでした（この画面を閉じると記録が消えます）'); });
   P.load();
   const qst = (g, q) => P.get(g.round, g.id, q.key);
   const shownNs = (q, st) => q.stages.map((s) => s.n).filter((n) => st.stages[n]);
@@ -100,22 +107,48 @@
   const btnBack = (href) => `<a class="btn" href="${href}">${ICON.back()}戻る</a>`;
   const progressBar = (cls = '') => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track"><div class="bar-fill" data-fill></div></div><span class="t" data-t="dur">0:00</span></div>`;
   const sourceLabel = (s) => (s === 'list' ? '読み込み用ファイル.txt' : s === 'listing' ? 'サーバーのフォルダ一覧' : s === 'probe' ? 'フォルダを順に探索' : '—');
-  const stageCountText = (q) => (q.mode === 'pair' ? '動画' : q.mode === 'clips' ? `${q.stages.length}クリップ` : `ヒント${q.stages.length}段階`);
+  const hasAnswer = (q) => !!(q.answer && (q.answer.image || q.answer.audio || q.answer.video || q.answer.text || q.answer.textSrc));
+  // 選択カードの段階数：1 段階だけの問題は問題画面と同じ「問題①」（解答があれば「＋解答」）
+  const stageCountText = (q) => (q.mode === 'pair' ? '動画' : q.mode === 'clips' ? `${q.stages.length}クリップ`
+    : q.stages.length === 1 ? `${stageName(q, q.stages[0].n)}${hasAnswer(q) ? '＋解答' : ''}` : `ヒント${q.stages.length}段階`);
 
+  // 描き直しの前後でフォーカスを保つ：同じ data-action / data-n / data-key / data-mode のボタンに戻す（キーボード操作用）
+  function focusDesc(el) {
+    if (!el || !el.dataset || !el.dataset.action || el.tagName === 'A') return null;
+    const d = { action: el.dataset.action };
+    ['n', 'key', 'mode'].forEach((k) => { if (el.dataset[k] != null) d[k] = el.dataset[k]; });
+    return d;
+  }
+  const cssq = (v) => (window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, '\\$&'));
+  function restoreFocus(d) {
+    if (!d) return false;
+    let sel = `[data-action="${cssq(d.action)}"]`;
+    ['n', 'key', 'mode'].forEach((k) => { if (d[k] != null) sel += `[data-${k}="${cssq(d[k])}"]`; });
+    const t = stage.querySelector(sel);
+    if (!t || t.disabled) return false;
+    try { t.focus({ preventScroll: true }); } catch (e) { t.focus(); }
+    return true;
+  }
   function render(parts) {
+    const fd = stage.contains(document.activeElement) ? focusDesc(document.activeElement) : null;
     stage.innerHTML = `<header class="bar top">${parts.header}</header><main class="main ${parts.cls || ''}">${parts.main}</main><footer class="bar bottom ${parts.footCls || ''}">${parts.footer}</footer>${parts.overlay || ''}`;
+    restoreFocus(fd);
     updateProgressUI();
   }
 
   /* ---------------- テキスト（メモ txt）の読み込み：描いた後に中身だけ差し込む ---------------- */
   const texts = new Map();
   const pendingTexts = new Set();
+  let textGen = 0;                  // フォルダを再読み込みしたら進める（古い読み込み結果を捨てる）
+  function clearTexts() { texts.clear(); pendingTexts.clear(); textGen++; if (L.clearTextCache) L.clearTextCache(); }
   function textOf(url) {
     if (!url) return null;
     if (texts.has(url)) return texts.get(url);
     if (!pendingTexts.has(url)) {
       pendingTexts.add(url);
+      const gen = textGen;
       L.loadText(url).then((t) => {
+        if (gen !== textGen) return;
         texts.set(url, t); pendingTexts.delete(url); fillTexts(url);
         if (cur.q && cur.q.mode === 'clips' && cur.q.answer.textSrc === url && !videoOnStage()) rerender();   // 逆転：メモ全文の帯はメモが読めてから決まる
       });
@@ -130,13 +163,15 @@
     });
     return map;
   }
+  // 「・」と空白の後ろで折り返せるように <wbr> を入れる（単語の途中では折らない：CSS の word-break: keep-all と組み合わせる）
+  const wbr = (html) => html.replace(/([・\s　])/g, '$1<wbr>');
   const firstLine = (t) => (String(t || '').split(/\r?\n/).map((s) => s.trim()).find((s) => s && !circledNum(s[0])) || '');
   function textPart(t, part) {
     if (t === undefined) return '<span class="muted">読み込み中…</span>';
     if (t === null) return '<span class="muted">（メモを読めません）</span>';
-    if (part === 'first') return esc(firstLine(t));
+    if (part === 'first') return wbr(esc(firstLine(t)));
     const m = /^clip:(\d+)$/.exec(part || '');
-    if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? esc(line) : '<span class="muted">（この番号の行がありません）</span>'; }
+    if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? wbr(esc(line)) : '<span class="muted">（この番号の行がありません）</span>'; }
     return esc(t).replace(/\n/g, '<br>');
   }
   const textSpan = (url, part, cls = '') => `<span class="${cls}" data-text-src="${esc(url)}" data-text-part="${esc(part)}">${textPart(textOf(url), part)}</span>`;
@@ -170,9 +205,17 @@
     audio.src = src; audio.currentTime = 0; nowPlaying = meta;
     audio.play().catch((err) => {
       if (err && err.name === 'AbortError') return;          // 次の再生に切り替えた
-      if (err && err.name === 'NotAllowedError') toast('再生できません（ブラウザが自動再生を止めました）');
+      if (isAutoplayBlock(err)) toast(AUTOPLAY_MSG);          // 読み込みの失敗は 'error' イベントで知らせる
       nowPlaying = null; refresh();
     });
+  }
+  // 再生中（一時停止中も）の同じクリップをもう一度押した：最初から流し直す（README「もう一度押すと流し直し」）
+  function restartAudio() {
+    try { audio.currentTime = 0; } catch (e) { /* 読み込み前 */ }
+    resumeAudio();
+  }
+  function resumeAudio() {
+    audio.play().catch((err) => { if (isAutoplayBlock(err)) { toast(AUTOPLAY_MSG); refresh(); } });
   }
   const npIs = (g, key, n) => !!(nowPlaying && nowPlaying.round === g.round && nowPlaying.gid === g.id && nowPlaying.key === key && (n === undefined || nowPlaying.n === n));
   audio.addEventListener('ended', () => { nowPlaying = null; refresh(); });
@@ -190,8 +233,10 @@
     if (pauseBtn && nowPlaying) pauseBtn.innerHTML = audio.paused ? ICON.play() + '再開' : ICON.pause() + '一時停止';
   }
   const videoWhat = () => stage.querySelector('[data-player]')?.dataset.what || '動画';
-  function toggleVideo() { const v = videoOnStage(); if (!v || !v.getAttribute('src')) return; if (v.paused || v.ended) v.play().catch((err) => { if (!err || err.name !== 'AbortError') toast(fileErr(v.getAttribute('src'), videoWhat())); }); else v.pause(); }
-  function toggleAudio() { if (!nowPlaying) return; if (audio.paused) audio.play().catch(() => {}); else audio.pause(); }
+  // 動画の play() の拒否：自動再生の制限だけ知らせる。読み込めないファイルは <video> の 'error' イベント（wirePlayer）が Drive の文言で知らせる
+  const videoPlayErr = (err) => { if (isAutoplayBlock(err)) toast(AUTOPLAY_MSG); };
+  function toggleVideo() { const v = videoOnStage(); if (!v || !v.getAttribute('src')) return; if (v.paused || v.ended) v.play().catch(videoPlayErr); else v.pause(); }
+  function toggleAudio() { if (!nowPlaying) return; if (audio.paused) resumeAudio(); else audio.pause(); }
 
   // NOW PLAYING（停止・一時停止・題・進み具合）
   function npBlock(np, opts = {}) {
@@ -211,9 +256,16 @@
         ${progressBar('dark')}
       </div>`;
   }
+  // 解答動画の上に出す解答の帯（曲名などを大きく。2 行まで）
+  function playerAnswer(q) {
+    const text = answerTextHtml(q);
+    return text ? `<section class="answer player-answer"><span class="ans-lbl"><span class="latin red">ANSWER</span><span>解答</span></span><div class="player-ans-text" data-player-answer>${text}</div></section>` : '';
+  }
   function wirePlayer(onPlay, pillWord) {
     const v = videoOnStage(); if (!v) return;
-    v.addEventListener('play', () => { syncVideoUI(pillWord); if (onPlay) onPlay(); });
+    v.addEventListener('play', () => syncVideoUI(pillWord));
+    // 記録は実際に絵が出始めたとき（'playing'）。'play' はファイルが読めなくても来る
+    if (onPlay) v.addEventListener('playing', onPlay);
     v.addEventListener('pause', () => syncVideoUI(pillWord)); v.addEventListener('ended', () => syncVideoUI(pillWord));
     v.addEventListener('timeupdate', updateProgressUI); v.addEventListener('durationchange', updateProgressUI);
     v.addEventListener('error', () => {
@@ -238,7 +290,7 @@
   function startVideo(fromStart) {
     const v = videoOnStage(); if (!v || !v.getAttribute('src')) return;
     if (fromStart) v.currentTime = 0;
-    v.play().catch((err) => { if (!err || err.name !== 'AbortError') toast(fileErr(v.getAttribute('src'), videoWhat())); });
+    v.play().catch(videoPlayErr);
   }
 
   /* ================= 読み込み ================= */
@@ -428,7 +480,7 @@
     if (subView === 'video' && q.answer.video) {
       render({
         header,
-        main: playerView({ src: q.answer.video, label: '解答動画', points: pts, rank, note: answerTextHtml(q) }),
+        main: playerAnswer(q) + playerView({ src: q.answer.video, label: '解答動画', points: pts, rank }),
         footer: `${btnBack(genreHref(g))}
           <div class="controls">
             <button class="btn grad lg" data-action="answer-back">${ICON.back(18)}問題に戻る</button>
@@ -458,12 +510,31 @@
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${btnTop(g.round)}`,
     });
-    stage.querySelectorAll('img[data-stage-img]').forEach((img) => img.addEventListener('error', () => {
-      toast(fileErr(img.getAttribute('src'), img.dataset.what));
-      const ph = document.createElement('div'); ph.className = 'placeholder';
-      ph.innerHTML = `${ICON.alert(56)}<span class="ph-title">画像を読み込めません</span><span class="ph-sub">Drive からダウンロードされていない可能性があります</span>`;
-      img.replaceWith(ph);
-    }));
+    stage.querySelectorAll('img[data-stage-img]').forEach((img) => {
+      const busy = img.parentNode && img.parentNode.querySelector('[data-img-loading]');
+      const done = () => { if (busy) busy.hidden = true; };
+      if (img.complete && img.naturalWidth) done();
+      img.addEventListener('load', done);
+      img.addEventListener('error', () => {
+        done();
+        toast(fileErr(img.getAttribute('src'), img.dataset.what));
+        const ph = document.createElement('div'); ph.className = 'placeholder';
+        ph.innerHTML = `${ICON.alert(56)}<span class="ph-title">画像を読み込めません</span><span class="ph-sub">Drive からダウンロードされていない可能性があります</span>`;
+        img.replaceWith(ph);
+      });
+    });
+    preloadNext(q, hi, answered);
+  }
+  // 次に出す画像を先に読んでおく（Drive の初回ダウンロードを待たせない）：次の段階、最後の段階なら解答の画像
+  const preloaded = new Set();
+  function preloadImage(src) { if (!src || preloaded.has(src)) return; preloaded.add(src); const im = new Image(); im.src = src; }
+  const isImageSrc = (src) => /\.(png|jpe?g|gif|webp|bmp|svg|avif)$/i.test(fileName(src));
+  function preloadNext(q, hi, answered) {
+    if (answered) return;
+    const i = hi == null ? -1 : q.stages.findIndex((x) => x.n === hi);
+    const next = q.stages[i + 1];
+    if (next) { if (next.format !== 'audio' && next.format !== 'text' && isImageSrc(next.src)) preloadImage(next.src); }
+    else if (q.answer.image) preloadImage(q.answer.image);
   }
   function imageView(g, q, hi, answered) {
     const first = q.stages[0];
@@ -475,21 +546,24 @@
       if (s && s.format === 'text') textStage = s; else if (s) src = s.src;
     }
     const inner = textStage ? `<div class="stage-text">${textSpan(textStage.src, 'all')}</div>`
-      : src ? `<img class="stage-img" data-stage-img data-what="${esc(tag)}" src="${esc(src)}" alt="">`
+      : src ? `<div class="img-loading" data-img-loading><div class="spinner"></div><span>読み込み中…</span></div><img class="stage-img" data-stage-img data-what="${esc(tag)}" src="${esc(src)}" alt="">`
       : `<div class="placeholder">${ICON.image(72)}<span class="ph-title">${esc(first ? stageName(q, first.n) : 'ヒント')}を出してください</span><span class="ph-sub">${q.stages.length > 1 ? `下のボタンで ${esc(stageSeq(q))} の順に出します` : '下のボタンで出します'}</span></div>`;
     return `<div class="imgbox"><div class="imgbox-top"><span class="pill-solid ${answered && q.answer.image ? 'ans' : ''}">${ICON.eye(14)}${esc(tag)}</span></div>${inner}</div>`;
   }
   function audioTiles(g, q, st) {
     const np = npIs(g, q.key) ? nowPlaying : null;
+    const answered = !!st.answer;
     const tiles = q.stages.map((s, i) => {
       const on = !!st.stages[s.n];
       const prevOk = i === 0 || !!st.stages[q.stages[i - 1].n];
+      // 解答を出している間はフッターのボタンと同じく、まだ出していない段階を出せない（出した段階はもう一度流せる）
+      const locked = !on && (!prevOk || answered);
       const playing = np && np.n === s.n;
       const p = q.scoring === 'points' ? null : stagePoints(q, s.n);
-      const cls = `stage-tile ${tierClass(stageRank(q, s.n))} ${on ? 'revealed' : ''} ${playing ? 'playing' : ''} ${!on && prevOk ? 'next' : ''}`;
-      const state = playing ? (audio.paused ? '一時停止中' : '再生中') : on ? '済 ・ もう一度流す' : prevOk ? '押すと再生' : 'ロック中';
-      const ic = playing ? (audio.paused ? ICON.pause(22) : ICON.wave(24)) : on ? ICON.check(22) : prevOk ? ICON.play(20) : ICON.lock(20);
-      return `<button class="${cls}" data-action="stage" data-n="${s.n}" ${!on && !prevOk ? 'disabled' : ''}>
+      const cls = `stage-tile ${tierClass(stageRank(q, s.n))} ${on ? 'revealed' : ''} ${playing ? 'playing' : ''} ${!locked && !on ? 'next' : ''}`;
+      const state = playing ? (audio.paused ? '一時停止中' : '再生中') : on ? '済 ・ もう一度流す' : locked ? 'ロック中' : '押すと再生';
+      const ic = playing ? (audio.paused ? ICON.pause(22) : ICON.wave(24)) : on ? ICON.check(22) : locked ? ICON.lock(20) : ICON.play(20);
+      return `<button class="${cls}" data-action="stage" data-n="${s.n}" ${locked ? 'disabled' : ''} ${!on && answered ? 'title="解答を表示中は出せません"' : ''}>
         <span class="tile-num">${circled(s.n)}</span><span class="tile-lbl">${stageName(q, s.n)}${p != null ? ` <b>${p}点</b>` : ''}</span>
         <span class="tile-state">${ic}${state}</span></button>`;
     }).join('');
@@ -512,8 +586,11 @@
       const p = q.scoring === 'points' ? null : stagePoints(q, s.n);
       const text = `${stageName(q, s.n)}${p != null ? `（${p}点）` : ''}`;
       const locked = !on && (!prevOk || !!st.answer);   // 解答を出したあとは残りの段階を出さない
+      // 解答を表示中は出した段階のボタンも押せない見た目にする（色味は残す）。解答の取り消しで戻る
+      const off = locked || !!st.answer;
       const cls = `btn stage-btn ${tierClass(stageRank(q, s.n))} ${on ? 'revealed' : !locked ? 'next' : ''}`;
-      return `<div class="stage-item"><button class="${cls}" data-action="stage" data-n="${s.n}" ${locked ? 'disabled' : ''} ${!on && st.answer ? 'title="解答を表示中は出せません"' : ''}>${on ? ICON.check() : !locked ? ICON.eye() : ICON.lock()}${text}</button>
+      const title = st.answer ? (on ? '解答を表示中です（解答を取り消すと戻ります）' : '解答を表示中は出せません') : '';
+      return `<div class="stage-item"><button class="${cls}" data-action="stage" data-n="${s.n}" ${off ? 'disabled' : ''} ${title ? `title="${title}"` : ''}>${on ? ICON.check() : !locked ? ICON.eye() : ICON.lock()}${text}</button>
         ${on ? `<button class="undo-btn" data-action="undo-stage" data-n="${s.n}" ${st.answer ? 'disabled' : ''} title="${st.answer ? '先に解答を取り消してください' : `${stageName(q, s.n)}${q.stages.length > 1 ? '以降' : ''}を取り消す`}">${ICON.undo(12)}取り消し</button>` : ''}</div>`;
     }).join('') + counter;
   }
@@ -525,7 +602,8 @@
     return `<section class="answer">
       <span class="ans-lbl"><span class="latin red">ANSWER</span><span>解答</span></span>
       <div class="ans-text on" data-answer-text>${text || `<span class="muted">${a.image ? '解答の画像を表示中' : '解答なし（ファイルがありません）'}</span>`}</div>
-      ${a.audio ? `<button class="btn red lg" data-action="answer-audio">${playingAns ? (audio.paused ? ICON.play(18) + '再開' : ICON.stop(18) + '停止') : ICON.play(18) + '解答を再生'}</button>` : ''}
+      ${a.audio ? `<button class="btn red lg" data-action="answer-audio">${playingAns ? ICON.refresh(18) + '最初から' : ICON.play(18) + '解答を再生'}</button>` : ''}
+      ${a.audio && playingAns ? `<button class="btn lg" data-action="stop">${ICON.stop(18)}停止</button>` : ''}
       ${a.video ? `<button class="btn red lg" data-action="answer-video">${ICON.video(18)}解答動画を再生</button>` : ''}
     </section>`;
   }
@@ -555,7 +633,7 @@
       const ansText = st.answer ? (answerTextHtml(q, 'ans-inline') || '<span class="ans-inline muted">（答えのメモがありません）</span>') : '';
       const ansBtn = !st.answer
         ? `<button class="btn red sm" data-action="list-answer" data-key="${esc(q.key)}">${ICON.eye()}答え</button>`
-        : q.answer.audio ? `<button class="btn red sm" data-action="list-answer" data-key="${esc(q.key)}">${playingAns ? (audio.paused ? ICON.play() + '再開' : ICON.stop() + '停止') : ICON.play() + '解答'}</button>` : '';
+        : q.answer.audio ? `<button class="btn red sm" data-action="list-answer" data-key="${esc(q.key)}" title="${playingAns ? '最初から流し直す（止めるときは下の停止）' : '解答を再生'}">${playingAns ? ICON.refresh() + '最初から' : ICON.play() + '解答'}</button>` : '';
       const ansUndo = st.answer ? `<button class="undo-btn" data-action="list-answer-undo" data-key="${esc(q.key)}">${ICON.undo(12)}隠す</button>` : '';
       return `<div class="qrow ${done ? 'is-done' : ''} ${focusKey === q.key ? 'focus' : ''}" data-row="${esc(q.key)}">
         <div class="qlabel-col"><span class="qlabel">${esc(q.label)}</span>${q.kind ? chip(esc(q.kind), 'sm') : ''}</div>
@@ -629,8 +707,10 @@
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${btnTop(g.round)}`,
     });
+    // 実際に流れ始めたら記録（'playing'）：問題動画 → 出題中、回答動画 → 出題済
     wirePlayer(() => {
-      if (videoMode === 'q') P.patch(g.round, g.id, q.key, { played: true }); else P.setAnswer(g.round, g.id, q.key, true);
+      const st = qst(g, q);
+      if (videoMode === 'q') { if (!st.played) P.patch(g.round, g.id, q.key, { played: true }); } else if (!st.answer) P.setAnswer(g.round, g.id, q.key, true);
     }, videoWord);
   }
   // 問題動画⇄回答動画を <video> を作り直さずに切り替える
@@ -651,20 +731,29 @@
   }
 
   /* ---------------- ルーティング ---------------- */
+  // 履歴を増やさず、hashchange も起こさずにアドレス欄だけ直す
+  function replaceHash(h) { try { history.replaceState(history.state, '', h); } catch (e) { /* file:// など */ } }
   function parseHash() { return location.hash.replace(/^#\/?/, '').split('/').filter(Boolean).map((s) => { try { return decodeURIComponent(s); } catch (e) { return s; } }); }
   function draw() {
     if (loading) return;
     const [rname, gid, key] = parseHash();
     const rd = rname ? roundByName(rname.normalize('NFC')) : null;
     cur = { round: rd ? rd.name : null, genre: null, q: null };
-    if (!rd) { if (rname && rounds.length) toast(`「${rname}」のフォルダが見つかりません`); return renderRounds(); }
+    if (!rd) {
+      if (rname && rounds.length) { toast(`「${rname}」のフォルダが見つかりません`); replaceHash('#/'); }
+      return renderRounds();
+    }
     const genre = gid ? rd.genres.find((g) => g.id === gid.normalize('NFC')) : null;
-    if (!genre) return renderTop(rd);
+    if (!genre) {
+      // 見つからないジャンル：知らせて、アドレス欄も TOP に置き換える（間違った URL を残さない）
+      if (gid) { toast(`「${gid}」のジャンルが見つかりません`); replaceHash(roundHref(rd.name)); }
+      return renderTop(rd);
+    }
     cur.genre = genre;
     const q = key ? findQ(genre, key.normalize('NFC')) : null;
     cur.q = q;
+    if (key && !q) { toast(`「${key}」の問題が見つかりません`); replaceHash(genreHref(genre)); }
     if (isAudioList(genre)) return renderAudioList(genre, q ? q.key : null);
-    if (key && !q) toast(`「${key}」の問題が見つかりません`);
     if (!q) return renderSelect(genre);
     if (q.mode === 'pair') return renderVideoQuiz(genre, q);
     if (q.mode === 'clips') return renderClipsQuiz(genre, q);
@@ -677,14 +766,14 @@
   function listQ(g, el) { return findQ(g, el.dataset.key); }
   function playStage(g, q, n, label) {
     const s = q.stages.find((x) => x.n === n); if (!s) return;
-    if (npIs(g, q.key, n)) { toggleAudio(); return; }
+    if (npIs(g, q.key, n)) { restartAudio(); return; }   // 同じクリップをもう一度：最初から（止めるのは Space・停止・一時停止）
     const what = label || stageName(q, n);
     const meta = { round: g.round, gid: g.id, key: q.key, n, what, qlabel: q.label, label: `${q.label} ・ ${what}`, points: stagePoints(q, n), rank: stageRank(q, n) };
     lastPlayed[g.round + '/' + g.id] = meta;
     playAudio(s.src, meta);
   }
   function playAnswerAudio(g, q) {
-    if (npIs(g, q.key, 'ans')) { if (audio.paused) audio.play().catch(() => {}); else stopAudio(); return; }
+    if (npIs(g, q.key, 'ans')) { restartAudio(); return; }
     playAudio(q.answer.audio, { round: g.round, gid: g.id, key: q.key, n: 'ans', what: '解答', qlabel: q.label, label: `${q.label} ・ 解答`, points: null, rank: null });
   }
 
@@ -694,8 +783,9 @@
     const r = cur.round, g = cur.genre, q = cur.q;
     const action = el.dataset.action;
     const n = el.dataset.n != null ? Number(el.dataset.n) : null;
+    const fd = focusDesc(el);
     switch (action) {
-      case 'reload-all': loadAll(); break;
+      case 'reload-all': clearTexts(); loadAll(); break;
       case 'reset-round':
         if (confirm(`${r} のすべての進捗（出題済の記録）をリセットしますか？`)) { stopAudio(); P.resetRound(r); toast(`${r} の進捗をリセットしました`); rerender(); }
         break;
@@ -725,6 +815,7 @@
         const st = qst(g, q);
         const prevOk = i === 0 || !!st.stages[q.stages[i - 1].n];
         if (!st.stages[n] && !prevOk) break;
+        if (!st.stages[n] && st.answer) break;   // 解答を表示中は新しい段階を出さない（点数が変わるため）。出した段階の再生だけ
         if (!st.stages[n]) P.revealStage(r, g.id, q.key, n);
         if (q.stages[i].format === 'audio') playStage(g, q, n);
         rerender();
@@ -801,15 +892,23 @@
         startVideo(true);
         break;
     }
-    if (el.blur) el.blur();
+    // 描き直しでボタンが入れ替わったら、同じ操作のボタンにフォーカスを戻す（Tab の位置を失わない）
+    if (el.tagName === 'A') el.blur();
+    else if (!el.isConnected && !stage.contains(document.activeElement)) restoreFocus(fd);
   });
 
+  let spaceToggled = false;
+  // keydown で再生を切り替えた Space は、keyup でフォーカス中のボタンを押さないようにする
+  document.addEventListener('keyup', (e) => { if (e.code === 'Space' && spaceToggled) { e.preventDefault(); spaceToggled = false; } });
   document.addEventListener('keydown', (e) => {
     if (e.target.matches && e.target.matches('input, textarea')) return;
     if (e.code === 'Space') {
-      e.preventDefault();
+      // Space は画面全体の再生／一時停止。流すものが無いときは何もしない（フォーカス中のボタンを Space で押せる）
+      if (!videoOnStage() && !nowPlaying) return;
+      e.preventDefault(); spaceToggled = true;
+      if (e.repeat) return;
       if (videoOnStage()) { toggleVideo(); return; }
-      if (nowPlaying) { toggleAudio(); rerender(); }
+      toggleAudio(); rerender();
     } else if (e.key === 'Escape') {
       if (showReport) { showReport = false; rerender(); return; }
       // 画面の「戻る」と同じく 1 階層上へ：問題 → ジャンル画面 → TOP → 回の選択
@@ -832,6 +931,16 @@
   document.addEventListener('visibilitychange', fitStage);
   if (window.ResizeObserver) new ResizeObserver(fitStage).observe(document.documentElement);
   window.addEventListener('hashchange', route);
+  // ほかのタブ・ウィンドウが進捗を書いたら読み直して描き直す（<video> が出ている間は描き直さない：次に描くときに反映）。
+  // 同時に書いた場合は後から書いた方が残る（last-writer-wins）。各タブは自分の状態を丸ごと保存するので、
+  // ほぼ同時の 2 つの書き込みの片方は消えうる。会場では 1 台・1 タブで出題する前提
+  window.addEventListener('storage', (e) => {
+    if (e.key !== null && e.key !== P.KEY) return;
+    try { if (e.storageArea && e.storageArea !== window.localStorage) return; } catch (err) { return; }
+    P.reload();
+    if (loading) return;
+    if (videoOnStage()) updateProgressUI(); else rerender();
+  });
   fitStage();
   requestAnimationFrame(fitStage);
   loadAll();
