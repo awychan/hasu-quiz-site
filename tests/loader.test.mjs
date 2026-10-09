@@ -526,3 +526,16 @@ test('番号の無い葉（級フォルダ）の幹が複数なら、キーは�
   const g = only(parse(['動画_テスト_点数方式/初級/甲_動画_問題.mp4', '動画_テスト_点数方式/初級/甲_動画_正解.mp4', '動画_テスト_点数方式/初級/乙_動画_問題.mp4', '動画_テスト_点数方式/初級/乙_動画_正解.mp4']));
   assert.deepEqual(g.questions.map((q) => q.key), ['初級~1', '初級~2']);
 });
+
+test('clearTextCache：メモを読み直す（読めなかった null も忘れる）', async () => {
+  let n = 0, ok = false;
+  const fetchImpl = async () => { n++; return ok ? { ok: true, text: async () => ' メモ ' } : { ok: false, text: async () => '' }; };
+  const { L: L2 } = loadQuizLoader({ fetchImpl });
+  assert.equal(await L2.loadText('media/第1回/x/_ダミー.txt'), null);
+  ok = true;
+  assert.equal(await L2.loadText('media/第1回/x/_ダミー.txt'), null, 'キャッシュのまま');
+  assert.equal(n, 1);
+  L2.clearTextCache();
+  assert.equal(await L2.loadText('media/第1回/x/_ダミー.txt'), 'メモ');
+  assert.equal(n, 2);
+});

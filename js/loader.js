@@ -588,9 +588,11 @@
     if (textCache.has(url)) return textCache.get(url);
     try { const r = await fetch(url, { cache: 'no-store' }); const t = r.ok ? (await r.text()).trim() : null; textCache.set(url, t); return t; } catch (e) { textCache.set(url, null); return null; }
   }
+  // 「フォルダを再読み込み」で呼ぶ：メモを読み直す（読めなかった null も忘れる）
+  function clearTextCache() { textCache.clear(); }
 
   window.QuizLoader = {
-    discoverRounds, loadRound, loadText, base: () => BASE, baseInfo, LIST, parse,
+    discoverRounds, loadRound, loadText, clearTextCache, base: () => BASE, baseInfo, LIST, parse,
     // 検査用（scripts/check_media.mjs・tests）
     _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, levelOf, stripPrefix, trimSep, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS, MARK_TOO_DEEP, MARK_UNREADABLE },
   };

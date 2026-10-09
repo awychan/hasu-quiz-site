@@ -156,8 +156,22 @@
     }
     return state;
   }
+  // 保存できなかったとき（容量超過・プライベートモードなど）は false を返し、onSaveFail で登録した関数に知らせる
+  let saveFailHook = null;
+  function onSaveFail(fn) { saveFailHook = typeof fn === 'function' ? fn : null; }
   function save() {
-    try { if (!storage) return false; storage.setItem(KEY, JSON.stringify(state)); return true; } catch (e) { return false; }
+    let ok = false;
+    try { if (storage) { storage.setItem(KEY, JSON.stringify(state)); ok = true; } } catch (e) { ok = false; }
+    if (!ok && saveFailHook) { try { saveFailHook(); } catch (e) { /* 知らせる側の失敗は無視 */ } }
+    return ok;
+  }
+  // ほかのタブが書き換えたときに、保存されている内容をそのまま読み直す（移行はしない）。
+  // 壊れた JSON のときは手元の状態を残す。キーが消えていれば空にする（ほかのタブで全部リセット）
+  function reload() {
+    const raw = read(KEY);
+    if (raw == null) { state = {}; return state; }
+    try { const s = JSON.parse(raw); if (isObj(s)) state = s; } catch (e) { /* 手元を残す */ }
+    return state;
   }
 
   function get(r, g, k) {
@@ -203,7 +217,7 @@
 
   root.QuizProgress = {
     KEY, OLD_KEY,
-    load, save, get, patch, revealStage, undoStage, clearStage, markClipPlayed, setAnswer, resetQ, resetRound, resolveV2Pairs,
+    load, reload, save, onSaveFail, get, patch, revealStage, undoStage, clearStage, markClipPlayed, setAnswer, resetQ, resetRound, resolveV2Pairs,
     revealed, playedClips, isStarted, isDone, countStarted, countDone,
     state: () => state,
     migratedFromV2: () => migrated,

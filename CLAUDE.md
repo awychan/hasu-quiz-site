@@ -36,12 +36,12 @@ Token discipline: follow /Users/awychan/Documents/Claude/Projects/CLAUDE_CODE_PL
 - Media are copyrighted: never commit `media/**` (gitignored); placeholder paths follow `media/README.md`.
 - Never commit real media file names (song titles, video stems, `_<曲名>.txt` …): they are the quiz answers. This covers code, tests, docs, PLAN.md, commit messages and PRs. Tests and examples use dummy names; write placeholders like `_<曲名>.txt`. `tests/expected.*.json` (real-data pattern counts) and `fonts/` are gitignored too, as is the `drive` symlink.
 - `drive` is a gitignored symlink to Google Drive for desktop's 「出題用サイト_媒体」 (shared by the organizers: read only, never write into it). Most files there are cloud placeholders that download on first read. A server started by the app preview sometimes cannot read it (404, cause unknown), so after starting any server verify with `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/drive/第1回/` (200 = readable) and start the server from a Terminal.
-- Branch flow: feature branch → PR into the integration branch `feat/v3` → one PR `feat/v3` → `main` (v3 alone on `main` would break the screens). Bump `?v=` in `index.html` in every PR that touches `js/` or `css/`.
+- Branch flow: feature branch → PR into `main` (the v3 integration branch was merged on 2026-10-09 and deleted). Do not stack PRs on top of each other: GitHub merges a stacked PR into its base branch, not `main`, unless the lower branch is deleted first. Bump `?v=` in `index.html` in every PR that touches `js/` or `css/`.
 - Screens re-render from state (`rerender()`); the shared `Audio` object survives re-renders, the `<video>` element does not (video screen updates DOM in place via `syncVideoUI`).
 
 ## Phase plan
 1. Done: Screens + progress store + media playback (2026-09-25)
 2. Done: Folder-driven loading per spec シート5: round screen, loader, list generator (2026-10-01)
 3. Done: Organizers filled the Drive folder (第1回, 2026-10-08); synced via `drive` symlink (Drive for desktop)
-4. Done (2026-10-08, branch `feat/v3`, PR pending): loader v3 + screens for the real folder structure (decisions and per-session tasks in PLAN.md); sessions 1-4 done, real-data QA in Chrome passed; remaining: visible-window playback check, `fetch_fonts.py` once online, re-run `check_media` after the organizers rename folders
+4. Done (2026-10-08, merged to `main` 2026-10-09 via PRs #1-#4): loader v3 + screens for the real folder structure (decisions and per-session tasks in PLAN.md); sessions 1-4 done, real-data QA in Chrome passed; remaining: visible-window playback check, `fetch_fonts.py` once online, re-run `check_media` after the organizers rename folders
 5. 会場準備 (offline pinning, network-off rehearsal, backup `media/` copy; checklist in README) and open items: 逆転 rule, 級の点数 confirmation, night mode

@@ -242,3 +242,35 @@ test('get は clips もコピーで返す／流したことが無ければ clips
   const m = P._internal.mergeEntry({ stages: {}, clips: { 1: true } }, { stages: {}, clips: { 4: true }, played: true });
   assert.deepEqual(m, { stages: {}, clips: { 1: true, 4: true }, played: true });
 });
+
+test('reload：ほかのタブが書いた内容を読み直す（キーが消えたら空、壊れた JSON は手元を残す）', () => {
+  const P = loadProgress();
+  const st = memStorage();
+  P.load(st);
+  P.revealStage('R', 'G', 'a', 1);
+  // 別のタブが書いた（a は無く、b がある）
+  st.setItem('hasu-quiz-progress-v3', JSON.stringify({ R: { G: { b: { stages: { 2: true } } } } }));
+  P.reload();
+  assert.deepEqual(P.get('R', 'G', 'a'), { stages: {} });
+  assert.deepEqual(P.get('R', 'G', 'b').stages, { 2: true });
+  st.setItem('hasu-quiz-progress-v3', '{壊れた');
+  P.reload();
+  assert.deepEqual(P.get('R', 'G', 'b').stages, { 2: true }, '壊れた JSON では手元を残す');
+  st.removeItem('hasu-quiz-progress-v3');
+  P.reload();
+  assert.deepEqual(P.state(), {});
+});
+
+test('save：書けないときは false を返し、onSaveFail に知らせる', () => {
+  const P = loadProgress();
+  const st = memStorage();
+  P.load(st);
+  let calls = 0;
+  P.onSaveFail(() => { calls++; });
+  assert.equal(P.save(), true);
+  st.setItem = () => { const e = new Error('quota'); e.name = 'QuotaExceededError'; throw e; };
+  assert.equal(P.save(), false);
+  P.revealStage('R', 'G', 'k', 1);   // 手元には残る
+  assert.deepEqual(P.get('R', 'G', 'k').stages, { 1: true });
+  assert.equal(calls, 2);
+});
