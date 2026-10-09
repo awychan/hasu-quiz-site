@@ -26,5 +26,6 @@ Token discipline: follow /Users/awychan/Documents/Claude/Projects/CLAUDE_CODE_PL
 ## Phase plan
 1. ✅ Screens + progress store + media playback (2026-09-25)
 2. ✅ Folder-driven loading per spec シート5: round screen, loader, list generator (2026-10-01)
-3. Organizers fill the Drive folder; sync to `media/`; on-site test on the projector
-4. Open spec items (see PLAN.md): 逆転 rule, night mode
+3. ✅ Organizers filled the Drive folder (第1回, 2026-10-08); synced via `drive` symlink (Drive for desktop)
+4. Loader v3 + screens for the real folder structure (①②③ = 5/2/1, per-question format, nested sub-genres, video overlay fix) — sessions 1 → 2 → 3a → 3b → 4 in PLAN.md, decisions recorded there (2026-10-08)
+5. 会場準備 (offline pinning, network-off rehearsal, backup copy) and open items: 逆転 rule, night mode

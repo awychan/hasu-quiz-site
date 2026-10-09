@@ -2,7 +2,8 @@
 (function () {
   'use strict';
   const CFG = window.QUIZ_CONFIG || {};
-  const BASE = String(CFG.mediaBase || 'media').replace(/\/+$/, '');
+  const CANDIDATES = (Array.isArray(CFG.mediaBases) && CFG.mediaBases.length ? CFG.mediaBases : [CFG.mediaBase || 'media']).map((b) => String(b).replace(/\/+$/, ''));
+  let BASE = CANDIDATES[0];
   const LIST = CFG.listFileName || '読み込み用ファイル.txt';
 
   const AUDIO_EXT = /\.(mp3|m4a|wav|aac|ogg|flac)$/i;
@@ -59,7 +60,20 @@
   function sortNatural(names) {
     return names.slice().sort((a, b) => { const na = numberOf(a), nb = numberOf(b); if (na != null && nb != null && na !== nb) return na - nb; return a.localeCompare(b, 'ja'); });
   }
+  // 候補の場所を順に調べ、最初に一覧（ファイル or サーバーのフォルダ一覧）が取れた場所を使う
+  let resolved = false;
+  async function resolveBase() {
+    if (resolved) return BASE;
+    for (const cand of CANDIDATES) {
+      BASE = cand;
+      if ((await fetchText(LIST)) != null) { resolved = true; return BASE; }
+      const entries = await fetchListing('');
+      if (entries) { resolved = true; return BASE; }
+    }
+    BASE = CANDIDATES[CANDIDATES.length - 1]; resolved = true; return BASE;
+  }
   async function discoverRounds() {
+    await resolveBase();
     const txt = await fetchText(LIST);
     if (txt != null) {
       const names = new Set();
@@ -233,5 +247,5 @@
     try { const r = await fetch(url, { cache: 'no-store' }); const t = r.ok ? (await r.text()).trim() : null; textCache.set(url, t); return t; } catch (e) { textCache.set(url, null); return null; }
   }
 
-  window.QuizLoader = { discoverRounds, loadRound, loadText, BASE, LIST, parse: buildRound };
+  window.QuizLoader = { discoverRounds, loadRound, loadText, base: () => BASE, LIST, parse: buildRound };
 })();

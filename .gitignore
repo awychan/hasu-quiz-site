@@ -2,3 +2,5 @@
 media/*
 !media/README.md
 .DS_Store
+# Google Drive for desktop の同期フォルダへのリンク（scripts/link_drive.py が作る）
+drive
