@@ -4,3 +4,9 @@ media/*
 .DS_Store
 # Google Drive for desktop の同期フォルダへのリンク（scripts/link_drive.py が作る）
 drive
+# 期待するパターン集計（運営と確認、実データ由来のため管理しない）
+tests/expected.*.json
+
+# セッション用の作業ツリー・自前ホストのフォント（scripts/fetch_fonts.py が作る）
+.claude/worktrees/
+fonts/
