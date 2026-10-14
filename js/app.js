@@ -65,9 +65,10 @@
     alert: (s = 15) => svg('<path d="M12 3 2 20h20z"></path><path d="M12 10v4M12 17.5v.5"></path>', s),
     list: (s = 15) => svg('<path d="M9 6h11M9 12h11M9 18h11"></path><path d="M4 6h.01M4 12h.01M4 18h.01"></path>', s),
     close: (s = 15) => svg('<path d="M6 6l12 12M18 6 6 18"></path>', s),
+    swap: (s = 15) => svg('<path d="M4 8h14"></path><path d="m14 4 4 4-4 4"></path><path d="M20 16H6"></path><path d="m10 12-4 4 4 4"></path>', s),
   };
   const fmtIcon = (f, s) => (f === 'video' ? ICON.video(s) : f === 'audio' ? ICON.music(s) : f === 'text' ? ICON.text(s) : ICON.image(s));
-  const catIcon = (g, s) => { const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
+  const catIcon = (g, s) => { if (g.gyakuten) return ICON.swap(s); const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
 
   /* ---------------- 進捗（js/progress.js） ---------------- */
   // 保存できなかったら 1 回だけ知らせる（記録は画面の中だけに残り、閉じると消える）
@@ -78,7 +79,7 @@
   const shownNs = (q, st) => q.stages.map((s) => s.n).filter((n) => st.stages[n]);
   const scoringLabel = (x) => x.scoringLabel || (x.scoring === 'points' ? '点数方式' : '減点方式');
   // 段階 n の点数と色（減点：段階の順位、点数方式：級の順位。点数方式は段階ボタンに点数を出さない）
-  const stagePoints = (q, n) => (q.scoring === 'points' ? q.pointsValue : (q.points && q.points[n - 1] != null ? q.points[n - 1] : null));
+  const stagePoints = (q, n) => (q.gyakuten ? null : q.scoring === 'points' ? q.pointsValue : (q.points && q.points[n - 1] != null ? q.points[n - 1] : null));
   const stageRank = (q, n) => (q.scoring === 'points' ? q.tierRank : n);
   // 段階の呼び名：1 段階だけの問題は「問題①」、それ以外は「ヒント①」（3a）
   const stageName = (q, n) => `${q && q.stages && q.stages.length === 1 ? '問題' : 'ヒント'}${circled(n)}`;
@@ -165,10 +166,14 @@
   // 「・」と空白の後ろで折り返せるように <wbr> を入れる（単語の途中では折らない：CSS の word-break: keep-all と組み合わせる）
   const wbr = (html) => html.replace(/([・\s　])/g, '$1<wbr>');
   const firstLine = (t) => (String(t || '').split(/\r?\n/).map((s) => s.trim()).find((s) => s && !circledNum(s[0])) || '');
+  // お題.txt：1 行 1 つ。BOM・CRLF・空行・前後の空白は無視
+  const odaiLines = (t) => String(t || '').replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   function textPart(t, part) {
     if (t === undefined) return '<span class="muted">読み込み中…</span>';
-    if (t === null) return '<span class="muted">（メモを読めません）</span>';
+    if (t === null) return `<span class="muted">${part === 'odai' ? '（お題.txt を読めません）' : part === 'rules' ? '（ルール.txt を読めません）' : '（メモを読めません）'}</span>`;
     if (part === 'first') return wbr(esc(firstLine(t)));
+    if (part === 'rules') return t ? esc(t) : '<span class="muted">（ルール.txt が空です）</span>';
+    if (part === 'odai') { const ls = odaiLines(t); return ls.length ? `<ul class="odai-list">${ls.map((l) => `<li>${wbr(esc(l))}</li>`).join('')}</ul>` : '<span class="muted">（お題.txt が空です）</span>'; }
     const m = /^clip:(\d+)$/.exec(part || '');
     if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? wbr(esc(line)) : '<span class="muted">（この番号の行がありません）</span>'; }
     return esc(t).replace(/\n/g, '<br>');
@@ -239,9 +244,9 @@
   function toggleAudio() { if (!nowPlaying) return; if (audio.paused) resumeAudio(); else audio.pause(); }
 
   // NOW PLAYING（停止・一時停止・題・進み具合）
-  function npBlock(np, opts = {}) {
+  function npBlock(np) {
     return `<button class="btn outline-p2" data-action="stop" ${np ? '' : 'disabled'}>${ICON.stop()}停止</button>
-      ${np && !opts.noToggle ? `<button class="btn" data-action="audio-toggle">${audio.paused ? ICON.play() + '再開' : ICON.pause() + '一時停止'}</button>` : ''}
+      ${np ? `<button class="btn" data-action="audio-toggle">${audio.paused ? ICON.play() + '再開' : ICON.pause() + '一時停止'}</button>` : ''}
       <div class="nowplaying"><span class="np-icon ${np ? '' : 'idle'}">${ICON.wave(18)}</span><div class="np-text"><span class="latin">NOW PLAYING</span><span class="np-title">${np ? esc(np.label) : '—'}</span></div>${progressBar()}</div>`;
   }
 
@@ -417,10 +422,11 @@
     const complete = total > 0 && started >= total;
     const pct = total ? Math.round((started / total) * 100) : 0;
     const qs = g.questions;
-    const clips = qs.filter((q) => q.mode === 'clips').length;
-    const deduct = qs.filter((q) => q.scoring === 'deduct' && q.mode !== 'clips').length;
+    const isRev = (q) => q.gyakuten || q.mode === 'clips';   // 逆転ジャンルの問題は全部逆転と数える
+    const clips = qs.filter(isRev).length;
+    const deduct = qs.filter((q) => q.scoring === 'deduct' && !isRev(q)).length;
     const byRank = {};
-    qs.forEach((q) => { if (q.scoring === 'points' && q.mode !== 'clips') { const k = q.tierRank || 0; byRank[k] = (byRank[k] || 0) + 1; } });
+    qs.forEach((q) => { if (q.scoring === 'points' && !isRev(q)) { const k = q.tierRank || 0; byRank[k] = (byRank[k] || 0) + 1; } });
     const ranks = Object.keys(byRank).map(Number).sort((a, b) => (a || 99) - (b || 99));
     const sum = [];
     if (deduct) sum.push(chip(`減点 ${deduct}問`, 'sm'));
@@ -483,16 +489,18 @@
     }).join('');
     render({
       header: hdrLeft(g.name, genreChips(g)) + pill('問題を選択', `${total}問`) + count(started, total),
-      main: `<div class="sel ${labeled ? 'labeled' : ''}">${html}</div>`,
+      main: `<div class="sel ${labeled ? 'labeled' : ''} ${g.rulesSrc ? 'has-rules' : ''}">${html}${g.rulesSrc ? rulesPanel(g) : ''}</div>`,
       footer: `<span class="spacer"></span>${btnTop(g.round)}`,
     });
   }
+  // ジャンルフォルダの ルール.txt を問題カードの下の空きに出す（改行はそのまま）
+  const rulesPanel = (g) => `<aside class="rules-panel"><div class="rules-head"><span class="latin">RULES</span><span class="rules-title">ルール</span></div>${textSpan(g.rulesSrc, 'rules', 'rules-body')}</aside>`;
   function qCard(g, q) {
     const st = qst(g, q); const started = P.isStarted(st); const done = qDone(st, q);
     const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : chip('未出題');
     return `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
       <div class="qc-top"><span class="qname">${esc(q.label)}</span>${status}</div>
-      <div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div></a>`;
+      ${g.gyakuten ? '' : `<div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div>`}</a>`;
   }
 
   /* ================= 段階ヒント画面（画像・音声・歌詞画像） ================= */
@@ -507,7 +515,7 @@
     const stateLabel = answered ? '解答 表示中' : hi != null ? (single ? `${stageName(q, hi)} 表示中` : `${stageName(q, hi)} まで表示中`) : single ? '問題 未表示' : 'ヒント未表示';
     const header = quizHead(g, q, (q.kind ? chip(esc(q.kind)) : '') + chip(esc(scoringLabel(q))) + levelChip(q))
       + pill('状態', esc(stateLabel), answered ? 'check' : 'eye', 'p2')
-      + `<div class="hdr-right">${badge('現在の', '点数', pts == null ? '—' : pts, pts == null ? null : rank)}</div>`;
+      + (q.gyakuten ? '' : `<div class="hdr-right">${badge('現在の', '点数', pts == null ? '—' : pts, pts == null ? null : rank)}</div>`);
 
     if (subView === 'video' && q.answer.video) {
       render({
@@ -699,7 +707,9 @@
           ? `${q.answer.textSrc ? textSpan(q.answer.textSrc, `clip:${s.n}`, 'clip-ans-text') : '<span class="clip-ans-text muted">（メモがありません）</span>'}<button class="undo-btn" data-action="clip-answer" data-n="${s.n}">${ICON.eyeOff(12)}隠す</button>`
           : `<button class="chip ans" data-action="clip-answer" data-n="${s.n}">${ICON.eye(12)}答え</button>`}</div></div>`;
     }).join('');
-    const sub = q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
+    // お題：お題.txt があればその行を箇条書きで（ヘッダーには収まらないので格子の上の帯）。無ければ従来どおりメモの 1 行目
+    const odai = q.odaiSrc ? `<div class="clip-odai"><span class="clip-odai-lbl">お題</span>${textSpan(q.odaiSrc, 'odai', 'odai-body')}</div>` : '';
+    const sub = q.odaiSrc ? '' : q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
     // メモに行が無い番号の答えを開いたときだけ、メモ全文を 1 回だけ出す（開く前に出すと他の番号の答えが見えてしまう）
     const noteText = q.answer.textSrc ? textOf(q.answer.textSrc) : undefined;
     const lines = typeof noteText === 'string' ? noteLines(noteText) : null;
@@ -708,14 +718,14 @@
     const rows = Math.ceil(q.stages.length / 5);
     render({
       header: quizHead(g, q, chip('逆転') + levelChip(q))
-        + `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`
+        + (q.odaiSrc ? '' : `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`)
         + `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`,
       cls: 'clips',
-      main: `${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
+      main: `${odai}${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
       footer: `${btnBack(genreHref(g))}
         <button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
-        ${npBlock(np, { noToggle: true })}${btnTop(g.round)}`,
+        ${npBlock(np)}${btnTop(g.round)}`,
     });
   }
 
@@ -727,7 +737,7 @@
     render({
       header: quizHead(g, q, levelChip(q) + chip(esc(scoringLabel(q))))
         + pill('状態', `${ICON.pause(14)}${videoWord()} 停止中`, null, 'p2', 'data-video-pill')
-        + badge('この問題', 'の点数', q.pointsValue != null ? q.pointsValue : '—', q.tierRank),
+        + (q.gyakuten ? '' : badge('この問題', 'の点数', q.pointsValue != null ? q.pointsValue : '—', q.tierRank)),
       main: playerView({ src, label: videoWord() }),
       footer: `${btnBack(genreHref(g))}
         <div class="controls">
