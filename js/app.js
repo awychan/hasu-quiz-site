@@ -87,7 +87,6 @@
   const findQ = (g, key) => (g.questions || []).find((q) => q.key === key) || null;
   // 逆転はクリップを流すか答えを開いたら出題済（それ以外は解答を出したか手動で済）
   const qDone = (st, q) => (q.mode === 'clips' ? P.isStarted(st) : P.isDone(st, q));
-  const nextQ = (g) => g.questions.find((q) => !P.isStarted(qst(g, q)));
   // 音声の一覧型（仕様書タブ2）：ジャンル内の全問題が「段階・音声・減点・3 段階以下」のとき
   const isAudioList = (g) => g.questions.length > 0 && g.questions.every((q) => q.mode === 'staged' && q.format === 'audio' && q.scoring === 'deduct' && q.stages.length <= TIER_POINTS.length);
 
@@ -248,7 +247,7 @@
   /* ---------------- 動画プレイヤー（対動画・段階ヒントの解答動画で共通） ---------------- */
   function playerView({ src, label, points, rank, note }) {
     return `<div class="player" data-player data-what="${esc(label)}">
-        <div class="player-top"><span class="pill-solid" data-player-label>${ICON.video(14)}${esc(label)}</span>
+        <div class="player-top">
           <span class="player-note" data-note>${note || (src ? '' : 'ファイルがありません')}</span>
           ${points != null ? `<span class="chip ${tierClass(rank)}-soft player-pts">${esc(points)}点</span>` : ''}</div>
         <video data-video ${src ? `src="${esc(src)}"` : ''} playsinline preload="metadata"></video>
@@ -436,7 +435,6 @@
   /* ================= 問題の選択画面（全ジャンル共通） ================= */
   function renderSelect(g) {
     const total = g.questions.length, started = P.countStarted(g);
-    const next = nextQ(g);
     const sections = g.sections && g.sections.length ? g.sections : [{ group: null, level: null, keys: g.questions.map((q) => q.key) }];
     const labeled = sections.some((s) => s.group || s.level);
     const html = sections.map((s, i) => {
@@ -445,7 +443,7 @@
       const sameGroup = prev && prev.group && prev.group === s.group;
       const label = labeled ? `<div class="sec-label">${s.group ? `<span class="sec-group ${sameGroup ? 'dim' : ''}">${esc(groupName(s.group))}</span>` : ''}
           ${s.level ? `<span class="lv-pill ${tierClass(s.level.rank)}">${esc(s.level.label)}<b>${esc(s.level.points)}</b>点</span>` : ''}</div>` : '';
-      return `<section class="sec ${labeled ? 'labeled' : 'single'}">${label}<div class="sec-grid">${qs.map((q) => qCard(g, q, next)).join('')}</div></section>`;
+      return `<section class="sec ${labeled ? 'labeled' : 'single'}">${label}<div class="sec-grid">${qs.map((q) => qCard(g, q)).join('')}</div></section>`;
     }).join('');
     render({
       header: hdrLeft(g.name, genreChips(g)) + pill('問題を選択', `${total}問`) + count(started, total),
@@ -453,14 +451,12 @@
       footer: `<span class="spacer"></span>${btnTop(g.round)}`,
     });
   }
-  function qCard(g, q, next) {
+  function qCard(g, q) {
     const st = qst(g, q); const started = P.isStarted(st); const done = qDone(st, q);
-    const isNext = next && next.key === q.key;
-    const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : isNext ? chip('次の問題', 'next') : chip('未出題');
-    const inner = `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
+    const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : chip('未出題');
+    return `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
       <div class="qc-top"><span class="qname">${esc(q.label)}</span>${status}</div>
       <div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div></a>`;
-    return isNext ? `<div class="next-wrap">${inner}</div>` : inner;
   }
 
   /* ================= 段階ヒント画面（画像・音声・歌詞画像） ================= */
@@ -548,7 +544,7 @@
     const inner = textStage ? `<div class="stage-text">${textSpan(textStage.src, 'all')}</div>`
       : src ? `<div class="img-loading" data-img-loading><div class="spinner"></div><span>読み込み中…</span></div><img class="stage-img" data-stage-img data-what="${esc(tag)}" src="${esc(src)}" alt="">`
       : `<div class="placeholder">${ICON.image(72)}<span class="ph-title">${esc(first ? stageName(q, first.n) : 'ヒント')}を出してください</span><span class="ph-sub">${q.stages.length > 1 ? `下のボタンで ${esc(stageSeq(q))} の順に出します` : '下のボタンで出します'}</span></div>`;
-    return `<div class="imgbox"><div class="imgbox-top"><span class="pill-solid ${answered && q.answer.image ? 'ans' : ''}">${ICON.eye(14)}${esc(tag)}</span></div>${inner}</div>`;
+    return `<div class="imgbox">${inner}</div>`;
   }
   function audioTiles(g, q, st) {
     const np = npIs(g, q.key) ? nowPlaying : null;
@@ -723,7 +719,6 @@
     if (src) v.setAttribute('src', src); else v.removeAttribute('src');
     v.load();
     stage.querySelectorAll('[data-action="video-mode"]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-    const lbl = stage.querySelector('[data-player-label]'); if (lbl) lbl.innerHTML = ICON.video(14) + esc(videoWord());
     const pl = stage.querySelector('[data-player]'); if (pl) pl.dataset.what = videoWord();
     const big = stage.querySelector('[data-bigplay-lbl]'); if (big) big.textContent = `${videoWord()}を再生`;
     const note = stage.querySelector('[data-note]'); if (note) note.textContent = src ? '' : 'ファイルがありません';
