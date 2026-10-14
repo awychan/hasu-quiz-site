@@ -185,7 +185,15 @@ button.chip:disabled { cursor: default; }
 .bigplay { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 0; border: 0; background: transparent; color: #fff; }
 .bigplay-circle { width: 96px; height: 96px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; border: 2px solid #879FFF; background: rgba(30, 33, 64, .6); color: #fff; }
 .bigplay-lbl { font-size: 16px; font-weight: 700; color: var(--player-text); }
-.player .progress { position: relative; z-index: 2; flex: none; }
+.player .progress { position: relative; z-index: 2; flex: none; transition: opacity .3s; }
+.player .player-top { transition: opacity .3s; }
+.player.ui-hidden, .player.ui-hidden video { cursor: none; }
+.player.ui-hidden .progress, .player.ui-hidden .player-top { opacity: 0; pointer-events: none; }
+.bar-track.seekable { position: relative; overflow: visible; cursor: pointer; touch-action: none; }
+.bar-track.seekable::before { content: ""; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }
+.bar-track.seekable .bar-fill { border-radius: 999px; transition: none; }
+.bar-thumb { position: absolute; top: 50%; left: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #879FFF; pointer-events: none; }
+.player.is-seeking, .player.is-seeking * { cursor: grabbing; }
 .segment { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); }
 .segment button { width: 126px; height: 40px; border-radius: 9px; border: 0; background: transparent; color: var(--muted); font-size: 14px; font-weight: 700; }
 .segment button.on { background: var(--grad); color: var(--grad-text); }

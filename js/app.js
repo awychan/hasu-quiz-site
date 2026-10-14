@@ -105,7 +105,7 @@
   const qHref = (g, key) => `#/${enc(g.round)}/${enc(g.id)}/${enc(key)}`;
   const btnTop = (r) => `<a class="btn" href="${roundHref(r)}">${ICON.home()}TOPへ</a>`;
   const btnBack = (href) => `<a class="btn" href="${href}">${ICON.back()}戻る</a>`;
-  const progressBar = (cls = '') => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track"><div class="bar-fill" data-fill></div></div><span class="t" data-t="dur">0:00</span></div>`;
+  const progressBar = (cls = '', seekable = false) => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track${seekable ? ' seekable' : ''}"${seekable ? ' data-seek role="slider" aria-label="再生位置"' : ''}><div class="bar-fill" data-fill></div>${seekable ? '<div class="bar-thumb" data-thumb></div>' : ''}</div><span class="t" data-t="dur">0:00</span></div>`;
   const sourceLabel = (s) => (s === 'list' ? '読み込み用ファイル.txt' : s === 'listing' ? 'サーバーのフォルダ一覧' : s === 'probe' ? 'フォルダを順に探索' : '—');
   const hasAnswer = (q) => !!(q.answer && (q.answer.image || q.answer.audio || q.answer.video || q.answer.text || q.answer.textSrc));
   // 選択カードの段階数：1 段階だけの問題は問題画面と同じ「問題①」（解答があれば「＋解答」）
@@ -227,6 +227,7 @@
     const m = activeMedia(); const fill = stage.querySelector('[data-fill]'); if (!fill) return;
     const c = m ? m.currentTime : 0, d = m && isFinite(m.duration) ? m.duration : 0;
     fill.style.width = d ? `${(c / d) * 100}%` : '0%';
+    const th = stage.querySelector('[data-thumb]'); if (th) th.style.left = d ? `${(c / d) * 100}%` : '0%';
     const tc = stage.querySelector('[data-t="cur"]'), td = stage.querySelector('[data-t="dur"]');
     if (tc) tc.textContent = fmt(c); if (td) td.textContent = fmt(d);
     const pauseBtn = stage.querySelector('[data-action="audio-toggle"]');
@@ -253,7 +254,7 @@
           ${points != null ? `<span class="chip ${tierClass(rank)}-soft player-pts">${esc(points)}点</span>` : ''}</div>
         <video data-video ${src ? `src="${esc(src)}"` : ''} playsinline preload="metadata"></video>
         <div class="bigplay-wrap" data-bigplay><button class="bigplay" data-action="video-toggle" aria-label="再生"><span class="bigplay-circle">${ICON.play(38)}</span><span class="bigplay-lbl" data-bigplay-lbl>${esc(label)}を再生</span></button></div>
-        ${progressBar('dark')}
+        ${progressBar('dark', true)}
       </div>`;
   }
   // 解答動画の上に出す解答の帯（曲名などを大きく。2 行まで）
@@ -274,13 +275,48 @@
       toast(fileErr(src, videoWhat())); syncVideoUI(pillWord);
     });
     v.addEventListener('click', toggleVideo);
+    wireSeek(v);
     syncVideoUI(pillWord);
+  }
+  // シークバー：クリック・ドラッグで移動。<video> と同様、描き直しのたびに作り直されるのでここで結び直す。
+  // 座標は getBoundingClientRect（#stage の scale() を含んだ実寸）と比で扱う
+  const HIDE_MS = 2500;
+  let hideTimer = 0;
+  function showPlayerUI() {
+    const pl = stage.querySelector('[data-player]'); if (!pl) return;
+    pl.classList.remove('ui-hidden'); clearTimeout(hideTimer);
+    const v = videoOnStage();
+    if (v && !v.paused && !v.ended && !pl.classList.contains('is-seeking')) hideTimer = setTimeout(() => pl.classList.add('ui-hidden'), HIDE_MS);
+  }
+  function wireSeek(v) {
+    const pl = stage.querySelector('[data-player]'); if (!pl) return;
+    const track = pl.querySelector('[data-seek]');
+    pl.addEventListener('mousemove', showPlayerUI);
+    pl.addEventListener('pointerdown', showPlayerUI);
+    pl.addEventListener('mouseleave', () => { if (!v.paused && !v.ended) pl.classList.add('ui-hidden'); });
+    if (!track) return;
+    const seekTo = (e) => {
+      const r = track.getBoundingClientRect(); const d = v.duration;
+      if (!r.width || !isFinite(d) || d <= 0) return;
+      v.currentTime = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * d;
+      updateProgressUI();
+    };
+    track.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      pl.classList.add('is-seeking'); track.setPointerCapture(e.pointerId); seekTo(e);
+    });
+    track.addEventListener('pointermove', (e) => { if (pl.classList.contains('is-seeking')) seekTo(e); });
+    const end = () => { pl.classList.remove('is-seeking'); showPlayerUI(); };
+    track.addEventListener('pointerup', end); track.addEventListener('pointercancel', end);
+    track.addEventListener('click', (e) => e.stopPropagation());
   }
   function syncVideoUI(pillWord) {
     const v = videoOnStage(); if (!v) return;
     const playing = !v.paused && !v.ended;
     const wrap = stage.querySelector('[data-bigplay]'); if (wrap) wrap.hidden = playing;
     stage.querySelector('[data-player]')?.classList.toggle('is-playing', playing);
+    showPlayerUI();
     const pillEl = stage.querySelector('[data-video-pill]');
     const word = typeof pillWord === 'function' ? pillWord() : (pillWord || '');
     if (pillEl) pillEl.innerHTML = (playing ? ICON.play(14) : ICON.pause(14)) + esc(word) + (playing ? ' 再生中' : ' 停止中');
