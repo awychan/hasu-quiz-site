@@ -177,7 +177,7 @@ button.chip:disabled { cursor: default; }
 
 /* ---- 動画 出題画面 ---- */
 .player { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 16px 20px; border-radius: 18px; background: var(--player); color: var(--player-text); overflow: hidden; }
-.player-top { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; }
+.player-top { position: relative; min-height: 28px; z-index: 2; display: flex; justify-content: space-between; align-items: center; }
 .player-note { font-size: 13px; font-weight: 700; color: var(--player-muted); }
 .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #05070F; }
 .bigplay-wrap { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
@@ -185,7 +185,15 @@ button.chip:disabled { cursor: default; }
 .bigplay { pointer-events: auto; display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 0; border: 0; background: transparent; color: #fff; }
 .bigplay-circle { width: 96px; height: 96px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; border: 2px solid #879FFF; background: rgba(30, 33, 64, .6); color: #fff; }
 .bigplay-lbl { font-size: 16px; font-weight: 700; color: var(--player-text); }
-.player .progress { position: relative; z-index: 2; flex: none; }
+.player .progress { position: relative; z-index: 2; flex: none; transition: opacity .3s; }
+.player .player-top { transition: opacity .3s; }
+.player.ui-hidden, .player.ui-hidden video { cursor: none; }
+.player.ui-hidden .progress, .player.ui-hidden .player-top { opacity: 0; pointer-events: none; }
+.bar-track.seekable { position: relative; overflow: visible; cursor: pointer; touch-action: none; }
+.bar-track.seekable::before { content: ""; position: absolute; left: 0; right: 0; top: -14px; bottom: -14px; }
+.bar-track.seekable .bar-fill { border-radius: 999px; transition: none; }
+.bar-thumb { position: absolute; top: 50%; left: 0; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 999px; background: #fff; box-shadow: 0 0 0 2px #879FFF; pointer-events: none; }
+.player.is-seeking, .player.is-seeking * { cursor: grabbing; }
 .segment { display: flex; gap: 4px; padding: 4px; border-radius: 12px; background: var(--chip); }
 .segment button { width: 126px; height: 40px; border-radius: 9px; border: 0; background: transparent; color: var(--muted); font-size: 14px; font-weight: 700; }
 .segment button.on { background: var(--grad); color: var(--grad-text); }
@@ -275,7 +283,7 @@ button.chip:disabled { cursor: default; }
 .sec-group { font-family: var(--serif); font-weight: 700; font-size: 22px; line-height: 1.2; }
 .sec-group.dim { color: #B5B5BE; font-size: 16px; }
 .sec-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.sec.single .sec-grid { grid-auto-rows: minmax(104px, 1fr); }
+.sec.single .sec-grid { grid-auto-rows: 140px; align-content: start; }
 .sec.labeled .sec-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); grid-auto-rows: 100px; }
 .card.qc { display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; box-shadow: 0 2px 10px rgba(30, 33, 64, .06); min-width: 0; }
 .card.qc:hover { box-shadow: 0 6px 18px rgba(30, 33, 64, .10); }
@@ -283,8 +291,6 @@ button.chip:disabled { cursor: default; }
 .qc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .qname { font-family: var(--serif); font-weight: 700; font-size: 26px; line-height: 1.1; white-space: nowrap; }
 .qc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.sec-grid .next-wrap { min-width: 0; }
-.next-wrap > .card.qc { flex: 1; box-shadow: none; border: 0; }
 
 /* ---- 段階ヒント画面 ---- */
 .main.staged { gap: 12px; }
@@ -388,3 +394,17 @@ button.chip:disabled { cursor: default; }
 /* ---- キーボード操作：フォーカスの輪 ---- */
 button:focus-visible, a:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
 .stage-tile:focus-visible, .clip-play:focus-visible { outline-offset: -4px; }
+
+/* ---- 逆転：お題.txt の箇条書き（格子の上の帯） ---- */
+.clip-odai { flex: none; display: flex; align-items: flex-start; gap: 14px; max-height: 88px; padding: 10px 20px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
+.clip-odai-lbl { flex: none; font-size: 13px; font-weight: 700; color: var(--red); line-height: 28px; }
+.odai-body { flex: 1; min-width: 0; max-height: 68px; overflow: auto; display: block; }
+.odai-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 2px 28px; font-family: var(--serif); font-weight: 700; font-size: 20px; line-height: 28px; word-break: keep-all; overflow-wrap: anywhere; }
+.odai-list li::before { content: "\2022"; color: var(--red); margin-right: 8px; }
+
+/* ---- 問題の選択画面：ルール.txt ---- */
+.sel.has-rules .sec.single { flex: none; }
+.rules-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 28px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); }
+.rules-head { flex: none; display: flex; align-items: baseline; gap: 12px; }
+.rules-title { font-family: var(--serif); font-weight: 700; font-size: 20px; }
+.rules-body { flex: 1; min-height: 0; overflow: auto; display: block; white-space: pre-wrap; font-size: 20px; line-height: 1.7; color: var(--text); }

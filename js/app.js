@@ -65,9 +65,10 @@
     alert: (s = 15) => svg('<path d="M12 3 2 20h20z"></path><path d="M12 10v4M12 17.5v.5"></path>', s),
     list: (s = 15) => svg('<path d="M9 6h11M9 12h11M9 18h11"></path><path d="M4 6h.01M4 12h.01M4 18h.01"></path>', s),
     close: (s = 15) => svg('<path d="M6 6l12 12M18 6 6 18"></path>', s),
+    swap: (s = 15) => svg('<path d="M4 8h14"></path><path d="m14 4 4 4-4 4"></path><path d="M20 16H6"></path><path d="m10 12-4 4 4 4"></path>', s),
   };
   const fmtIcon = (f, s) => (f === 'video' ? ICON.video(s) : f === 'audio' ? ICON.music(s) : f === 'text' ? ICON.text(s) : ICON.image(s));
-  const catIcon = (g, s) => { const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
+  const catIcon = (g, s) => { if (g.gyakuten) return ICON.swap(s); const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
 
   /* ---------------- 進捗（js/progress.js） ---------------- */
   // 保存できなかったら 1 回だけ知らせる（記録は画面の中だけに残り、閉じると消える）
@@ -78,7 +79,7 @@
   const shownNs = (q, st) => q.stages.map((s) => s.n).filter((n) => st.stages[n]);
   const scoringLabel = (x) => x.scoringLabel || (x.scoring === 'points' ? '点数方式' : '減点方式');
   // 段階 n の点数と色（減点：段階の順位、点数方式：級の順位。点数方式は段階ボタンに点数を出さない）
-  const stagePoints = (q, n) => (q.scoring === 'points' ? q.pointsValue : (q.points && q.points[n - 1] != null ? q.points[n - 1] : null));
+  const stagePoints = (q, n) => (q.gyakuten ? null : q.scoring === 'points' ? q.pointsValue : (q.points && q.points[n - 1] != null ? q.points[n - 1] : null));
   const stageRank = (q, n) => (q.scoring === 'points' ? q.tierRank : n);
   // 段階の呼び名：1 段階だけの問題は「問題①」、それ以外は「ヒント①」（3a）
   const stageName = (q, n) => `${q && q.stages && q.stages.length === 1 ? '問題' : 'ヒント'}${circled(n)}`;
@@ -87,7 +88,6 @@
   const findQ = (g, key) => (g.questions || []).find((q) => q.key === key) || null;
   // 逆転はクリップを流すか答えを開いたら出題済（それ以外は解答を出したか手動で済）
   const qDone = (st, q) => (q.mode === 'clips' ? P.isStarted(st) : P.isDone(st, q));
-  const nextQ = (g) => g.questions.find((q) => !P.isStarted(qst(g, q)));
   // 音声の一覧型（仕様書タブ2）：ジャンル内の全問題が「段階・音声・減点・3 段階以下」のとき
   const isAudioList = (g) => g.questions.length > 0 && g.questions.every((q) => q.mode === 'staged' && q.format === 'audio' && q.scoring === 'deduct' && q.stages.length <= TIER_POINTS.length);
 
@@ -105,7 +105,7 @@
   const qHref = (g, key) => `#/${enc(g.round)}/${enc(g.id)}/${enc(key)}`;
   const btnTop = (r) => `<a class="btn" href="${roundHref(r)}">${ICON.home()}TOPへ</a>`;
   const btnBack = (href) => `<a class="btn" href="${href}">${ICON.back()}戻る</a>`;
-  const progressBar = (cls = '') => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track"><div class="bar-fill" data-fill></div></div><span class="t" data-t="dur">0:00</span></div>`;
+  const progressBar = (cls = '', seekable = false) => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track${seekable ? ' seekable' : ''}"${seekable ? ' data-seek role="slider" aria-label="再生位置"' : ''}><div class="bar-fill" data-fill></div>${seekable ? '<div class="bar-thumb" data-thumb></div>' : ''}</div><span class="t" data-t="dur">0:00</span></div>`;
   const sourceLabel = (s) => (s === 'list' ? '読み込み用ファイル.txt' : s === 'listing' ? 'サーバーのフォルダ一覧' : s === 'probe' ? 'フォルダを順に探索' : '—');
   const hasAnswer = (q) => !!(q.answer && (q.answer.image || q.answer.audio || q.answer.video || q.answer.text || q.answer.textSrc));
   // 選択カードの段階数：1 段階だけの問題は問題画面と同じ「問題①」（解答があれば「＋解答」）
@@ -166,10 +166,14 @@
   // 「・」と空白の後ろで折り返せるように <wbr> を入れる（単語の途中では折らない：CSS の word-break: keep-all と組み合わせる）
   const wbr = (html) => html.replace(/([・\s　])/g, '$1<wbr>');
   const firstLine = (t) => (String(t || '').split(/\r?\n/).map((s) => s.trim()).find((s) => s && !circledNum(s[0])) || '');
+  // お題.txt：1 行 1 つ。BOM・CRLF・空行・前後の空白は無視
+  const odaiLines = (t) => String(t || '').replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
   function textPart(t, part) {
     if (t === undefined) return '<span class="muted">読み込み中…</span>';
-    if (t === null) return '<span class="muted">（メモを読めません）</span>';
+    if (t === null) return `<span class="muted">${part === 'odai' ? '（お題.txt を読めません）' : part === 'rules' ? '（ルール.txt を読めません）' : '（メモを読めません）'}</span>`;
     if (part === 'first') return wbr(esc(firstLine(t)));
+    if (part === 'rules') return t ? esc(t) : '<span class="muted">（ルール.txt が空です）</span>';
+    if (part === 'odai') { const ls = odaiLines(t); return ls.length ? `<ul class="odai-list">${ls.map((l) => `<li>${wbr(esc(l))}</li>`).join('')}</ul>` : '<span class="muted">（お題.txt が空です）</span>'; }
     const m = /^clip:(\d+)$/.exec(part || '');
     if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? wbr(esc(line)) : '<span class="muted">（この番号の行がありません）</span>'; }
     return esc(t).replace(/\n/g, '<br>');
@@ -189,7 +193,7 @@
   const audio = new Audio();
   let nowPlaying = null;            // { round, gid, key, n, label, points, rank }
   const lastPlayed = {};            // ジャンルごとに最後に流した段階（一覧型の「現在の点数」）
-  let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 回答動画
+  let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 解答動画
   let subView = 'stages';           // 段階ヒント画面：'stages' / 'video'（解答動画）
   let showReport = false;
   let scrollFocus = false;
@@ -227,6 +231,7 @@
     const m = activeMedia(); const fill = stage.querySelector('[data-fill]'); if (!fill) return;
     const c = m ? m.currentTime : 0, d = m && isFinite(m.duration) ? m.duration : 0;
     fill.style.width = d ? `${(c / d) * 100}%` : '0%';
+    const th = stage.querySelector('[data-thumb]'); if (th) th.style.left = d ? `${(c / d) * 100}%` : '0%';
     const tc = stage.querySelector('[data-t="cur"]'), td = stage.querySelector('[data-t="dur"]');
     if (tc) tc.textContent = fmt(c); if (td) td.textContent = fmt(d);
     const pauseBtn = stage.querySelector('[data-action="audio-toggle"]');
@@ -239,21 +244,21 @@
   function toggleAudio() { if (!nowPlaying) return; if (audio.paused) resumeAudio(); else audio.pause(); }
 
   // NOW PLAYING（停止・一時停止・題・進み具合）
-  function npBlock(np, opts = {}) {
+  function npBlock(np) {
     return `<button class="btn outline-p2" data-action="stop" ${np ? '' : 'disabled'}>${ICON.stop()}停止</button>
-      ${np && !opts.noToggle ? `<button class="btn" data-action="audio-toggle">${audio.paused ? ICON.play() + '再開' : ICON.pause() + '一時停止'}</button>` : ''}
+      ${np ? `<button class="btn" data-action="audio-toggle">${audio.paused ? ICON.play() + '再開' : ICON.pause() + '一時停止'}</button>` : ''}
       <div class="nowplaying"><span class="np-icon ${np ? '' : 'idle'}">${ICON.wave(18)}</span><div class="np-text"><span class="latin">NOW PLAYING</span><span class="np-title">${np ? esc(np.label) : '—'}</span></div>${progressBar()}</div>`;
   }
 
   /* ---------------- 動画プレイヤー（対動画・段階ヒントの解答動画で共通） ---------------- */
   function playerView({ src, label, points, rank, note }) {
     return `<div class="player" data-player data-what="${esc(label)}">
-        <div class="player-top"><span class="pill-solid" data-player-label>${ICON.video(14)}${esc(label)}</span>
+        <div class="player-top">
           <span class="player-note" data-note>${note || (src ? '' : 'ファイルがありません')}</span>
           ${points != null ? `<span class="chip ${tierClass(rank)}-soft player-pts">${esc(points)}点</span>` : ''}</div>
         <video data-video ${src ? `src="${esc(src)}"` : ''} playsinline preload="metadata"></video>
         <div class="bigplay-wrap" data-bigplay><button class="bigplay" data-action="video-toggle" aria-label="再生"><span class="bigplay-circle">${ICON.play(38)}</span><span class="bigplay-lbl" data-bigplay-lbl>${esc(label)}を再生</span></button></div>
-        ${progressBar('dark')}
+        ${progressBar('dark', true)}
       </div>`;
   }
   // 解答動画の上に出す解答の帯（曲名などを大きく。2 行まで）
@@ -274,13 +279,48 @@
       toast(fileErr(src, videoWhat())); syncVideoUI(pillWord);
     });
     v.addEventListener('click', toggleVideo);
+    wireSeek(v);
     syncVideoUI(pillWord);
+  }
+  // シークバー：クリック・ドラッグで移動。<video> と同様、描き直しのたびに作り直されるのでここで結び直す。
+  // 座標は getBoundingClientRect（#stage の scale() を含んだ実寸）と比で扱う
+  const HIDE_MS = 2500;
+  let hideTimer = 0;
+  function showPlayerUI() {
+    const pl = stage.querySelector('[data-player]'); if (!pl) return;
+    pl.classList.remove('ui-hidden'); clearTimeout(hideTimer);
+    const v = videoOnStage();
+    if (v && !v.paused && !v.ended && !pl.classList.contains('is-seeking')) hideTimer = setTimeout(() => pl.classList.add('ui-hidden'), HIDE_MS);
+  }
+  function wireSeek(v) {
+    const pl = stage.querySelector('[data-player]'); if (!pl) return;
+    const track = pl.querySelector('[data-seek]');
+    pl.addEventListener('mousemove', showPlayerUI);
+    pl.addEventListener('pointerdown', showPlayerUI);
+    pl.addEventListener('mouseleave', () => { if (!v.paused && !v.ended) pl.classList.add('ui-hidden'); });
+    if (!track) return;
+    const seekTo = (e) => {
+      const r = track.getBoundingClientRect(); const d = v.duration;
+      if (!r.width || !isFinite(d) || d <= 0) return;
+      v.currentTime = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * d;
+      updateProgressUI();
+    };
+    track.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault(); e.stopPropagation();
+      pl.classList.add('is-seeking'); track.setPointerCapture(e.pointerId); seekTo(e);
+    });
+    track.addEventListener('pointermove', (e) => { if (pl.classList.contains('is-seeking')) seekTo(e); });
+    const end = () => { pl.classList.remove('is-seeking'); showPlayerUI(); };
+    track.addEventListener('pointerup', end); track.addEventListener('pointercancel', end);
+    track.addEventListener('click', (e) => e.stopPropagation());
   }
   function syncVideoUI(pillWord) {
     const v = videoOnStage(); if (!v) return;
     const playing = !v.paused && !v.ended;
     const wrap = stage.querySelector('[data-bigplay]'); if (wrap) wrap.hidden = playing;
     stage.querySelector('[data-player]')?.classList.toggle('is-playing', playing);
+    showPlayerUI();
     const pillEl = stage.querySelector('[data-video-pill]');
     const word = typeof pillWord === 'function' ? pillWord() : (pillWord || '');
     if (pillEl) pillEl.innerHTML = (playing ? ICON.play(14) : ICON.pause(14)) + esc(word) + (playing ? ' 再生中' : ' 停止中');
@@ -382,10 +422,11 @@
     const complete = total > 0 && started >= total;
     const pct = total ? Math.round((started / total) * 100) : 0;
     const qs = g.questions;
-    const clips = qs.filter((q) => q.mode === 'clips').length;
-    const deduct = qs.filter((q) => q.scoring === 'deduct' && q.mode !== 'clips').length;
+    const isRev = (q) => q.gyakuten || q.mode === 'clips';   // 逆転ジャンルの問題は全部逆転と数える
+    const clips = qs.filter(isRev).length;
+    const deduct = qs.filter((q) => q.scoring === 'deduct' && !isRev(q)).length;
     const byRank = {};
-    qs.forEach((q) => { if (q.scoring === 'points' && q.mode !== 'clips') { const k = q.tierRank || 0; byRank[k] = (byRank[k] || 0) + 1; } });
+    qs.forEach((q) => { if (q.scoring === 'points' && !isRev(q)) { const k = q.tierRank || 0; byRank[k] = (byRank[k] || 0) + 1; } });
     const ranks = Object.keys(byRank).map(Number).sort((a, b) => (a || 99) - (b || 99));
     const sum = [];
     if (deduct) sum.push(chip(`減点 ${deduct}問`, 'sm'));
@@ -436,7 +477,6 @@
   /* ================= 問題の選択画面（全ジャンル共通） ================= */
   function renderSelect(g) {
     const total = g.questions.length, started = P.countStarted(g);
-    const next = nextQ(g);
     const sections = g.sections && g.sections.length ? g.sections : [{ group: null, level: null, keys: g.questions.map((q) => q.key) }];
     const labeled = sections.some((s) => s.group || s.level);
     const html = sections.map((s, i) => {
@@ -445,22 +485,22 @@
       const sameGroup = prev && prev.group && prev.group === s.group;
       const label = labeled ? `<div class="sec-label">${s.group ? `<span class="sec-group ${sameGroup ? 'dim' : ''}">${esc(groupName(s.group))}</span>` : ''}
           ${s.level ? `<span class="lv-pill ${tierClass(s.level.rank)}">${esc(s.level.label)}<b>${esc(s.level.points)}</b>点</span>` : ''}</div>` : '';
-      return `<section class="sec ${labeled ? 'labeled' : 'single'}">${label}<div class="sec-grid">${qs.map((q) => qCard(g, q, next)).join('')}</div></section>`;
+      return `<section class="sec ${labeled ? 'labeled' : 'single'}">${label}<div class="sec-grid">${qs.map((q) => qCard(g, q)).join('')}</div></section>`;
     }).join('');
     render({
       header: hdrLeft(g.name, genreChips(g)) + pill('問題を選択', `${total}問`) + count(started, total),
-      main: `<div class="sel ${labeled ? 'labeled' : ''}">${html}</div>`,
+      main: `<div class="sel ${labeled ? 'labeled' : ''} ${g.rulesSrc ? 'has-rules' : ''}">${html}${g.rulesSrc ? rulesPanel(g) : ''}</div>`,
       footer: `<span class="spacer"></span>${btnTop(g.round)}`,
     });
   }
-  function qCard(g, q, next) {
+  // ジャンルフォルダの ルール.txt を問題カードの下の空きに出す（改行はそのまま）
+  const rulesPanel = (g) => `<aside class="rules-panel"><div class="rules-head"><span class="latin">RULES</span><span class="rules-title">ルール</span></div>${textSpan(g.rulesSrc, 'rules', 'rules-body')}</aside>`;
+  function qCard(g, q) {
     const st = qst(g, q); const started = P.isStarted(st); const done = qDone(st, q);
-    const isNext = next && next.key === q.key;
-    const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : isNext ? chip('次の問題', 'next') : chip('未出題');
-    const inner = `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
+    const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : chip('未出題');
+    return `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
       <div class="qc-top"><span class="qname">${esc(q.label)}</span>${status}</div>
-      <div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div></a>`;
-    return isNext ? `<div class="next-wrap">${inner}</div>` : inner;
+      ${g.gyakuten ? '' : `<div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div>`}</a>`;
   }
 
   /* ================= 段階ヒント画面（画像・音声・歌詞画像） ================= */
@@ -475,7 +515,7 @@
     const stateLabel = answered ? '解答 表示中' : hi != null ? (single ? `${stageName(q, hi)} 表示中` : `${stageName(q, hi)} まで表示中`) : single ? '問題 未表示' : 'ヒント未表示';
     const header = quizHead(g, q, (q.kind ? chip(esc(q.kind)) : '') + chip(esc(scoringLabel(q))) + levelChip(q))
       + pill('状態', esc(stateLabel), answered ? 'check' : 'eye', 'p2')
-      + `<div class="hdr-right">${badge('現在の', '点数', pts == null ? '—' : pts, pts == null ? null : rank)}</div>`;
+      + (q.gyakuten ? '' : `<div class="hdr-right">${badge('現在の', '点数', pts == null ? '—' : pts, pts == null ? null : rank)}</div>`);
 
     if (subView === 'video' && q.answer.video) {
       render({
@@ -548,7 +588,7 @@
     const inner = textStage ? `<div class="stage-text">${textSpan(textStage.src, 'all')}</div>`
       : src ? `<div class="img-loading" data-img-loading><div class="spinner"></div><span>読み込み中…</span></div><img class="stage-img" data-stage-img data-what="${esc(tag)}" src="${esc(src)}" alt="">`
       : `<div class="placeholder">${ICON.image(72)}<span class="ph-title">${esc(first ? stageName(q, first.n) : 'ヒント')}を出してください</span><span class="ph-sub">${q.stages.length > 1 ? `下のボタンで ${esc(stageSeq(q))} の順に出します` : '下のボタンで出します'}</span></div>`;
-    return `<div class="imgbox"><div class="imgbox-top"><span class="pill-solid ${answered && q.answer.image ? 'ans' : ''}">${ICON.eye(14)}${esc(tag)}</span></div>${inner}</div>`;
+    return `<div class="imgbox">${inner}</div>`;
   }
   function audioTiles(g, q, st) {
     const np = npIs(g, q.key) ? nowPlaying : null;
@@ -667,7 +707,9 @@
           ? `${q.answer.textSrc ? textSpan(q.answer.textSrc, `clip:${s.n}`, 'clip-ans-text') : '<span class="clip-ans-text muted">（メモがありません）</span>'}<button class="undo-btn" data-action="clip-answer" data-n="${s.n}">${ICON.eyeOff(12)}隠す</button>`
           : `<button class="chip ans" data-action="clip-answer" data-n="${s.n}">${ICON.eye(12)}答え</button>`}</div></div>`;
     }).join('');
-    const sub = q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
+    // お題：お題.txt があればその行を箇条書きで（ヘッダーには収まらないので格子の上の帯）。無ければ従来どおりメモの 1 行目
+    const odai = q.odaiSrc ? `<div class="clip-odai"><span class="clip-odai-lbl">お題</span>${textSpan(q.odaiSrc, 'odai', 'odai-body')}</div>` : '';
+    const sub = q.odaiSrc ? '' : q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
     // メモに行が無い番号の答えを開いたときだけ、メモ全文を 1 回だけ出す（開く前に出すと他の番号の答えが見えてしまう）
     const noteText = q.answer.textSrc ? textOf(q.answer.textSrc) : undefined;
     const lines = typeof noteText === 'string' ? noteLines(noteText) : null;
@@ -676,44 +718,44 @@
     const rows = Math.ceil(q.stages.length / 5);
     render({
       header: quizHead(g, q, chip('逆転') + levelChip(q))
-        + `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`
+        + (q.odaiSrc ? '' : `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`)
         + `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`,
       cls: 'clips',
-      main: `${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
+      main: `${odai}${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
       footer: `${btnBack(genreHref(g))}
         <button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
-        ${npBlock(np, { noToggle: true })}${btnTop(g.round)}`,
+        ${npBlock(np)}${btnTop(g.round)}`,
     });
   }
 
-  /* ================= 対動画（問題動画／回答動画） ================= */
-  const videoWord = () => (videoMode === 'a' ? '回答動画' : '問題動画');
+  /* ================= 対動画（問題動画／解答動画） ================= */
+  const videoWord = () => (videoMode === 'a' ? '解答動画' : '問題動画');
   function renderVideoQuiz(g, q) {
     const pair = q.pair || {};
     const src = videoMode === 'a' ? pair.answer : pair.question;
     render({
       header: quizHead(g, q, levelChip(q) + chip(esc(scoringLabel(q))))
         + pill('状態', `${ICON.pause(14)}${videoWord()} 停止中`, null, 'p2', 'data-video-pill')
-        + badge('この問題', 'の点数', q.pointsValue != null ? q.pointsValue : '—', q.tierRank),
+        + (q.gyakuten ? '' : badge('この問題', 'の点数', q.pointsValue != null ? q.pointsValue : '—', q.tierRank)),
       main: playerView({ src, label: videoWord() }),
       footer: `${btnBack(genreHref(g))}
         <div class="controls">
           <div class="controls-group"><span class="seg-label">いま流している動画</span>
-            <div class="segment"><button class="${videoMode === 'q' ? 'on' : ''}" data-action="video-mode" data-mode="q">問題動画</button><button class="${videoMode === 'a' ? 'on' : ''}" data-action="video-mode" data-mode="a">回答動画</button></div></div>
-          <button class="btn red lg" data-action="video-answer" ${pair.answer ? '' : 'disabled'}>${ICON.eye(19)}回答動画を再生</button>
+            <div class="segment"><button class="${videoMode === 'q' ? 'on' : ''}" data-action="video-mode" data-mode="q">問題動画</button><button class="${videoMode === 'a' ? 'on' : ''}" data-action="video-mode" data-mode="a">解答動画</button></div></div>
+          <button class="btn red lg" data-action="video-answer" ${pair.answer ? '' : 'disabled'}>${ICON.eye(19)}解答動画を再生</button>
           <button class="btn" data-action="video-restart" ${pair.question ? '' : 'disabled'}>${ICON.refresh(16)}問題動画を最初から</button>
         </div>
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${btnTop(g.round)}`,
     });
-    // 実際に流れ始めたら記録（'playing'）：問題動画 → 出題中、回答動画 → 出題済
+    // 実際に流れ始めたら記録（'playing'）：問題動画 → 出題中、解答動画 → 出題済
     wirePlayer(() => {
       const st = qst(g, q);
       if (videoMode === 'q') { if (!st.played) P.patch(g.round, g.id, q.key, { played: true }); } else if (!st.answer) P.setAnswer(g.round, g.id, q.key, true);
     }, videoWord);
   }
-  // 問題動画⇄回答動画を <video> を作り直さずに切り替える
+  // 問題動画⇄解答動画を <video> を作り直さずに切り替える
   function setVideoMode(q, mode) {
     videoMode = mode;
     const v = videoOnStage(); if (!v) return;
@@ -723,7 +765,6 @@
     if (src) v.setAttribute('src', src); else v.removeAttribute('src');
     v.load();
     stage.querySelectorAll('[data-action="video-mode"]').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
-    const lbl = stage.querySelector('[data-player-label]'); if (lbl) lbl.innerHTML = ICON.video(14) + esc(videoWord());
     const pl = stage.querySelector('[data-player]'); if (pl) pl.dataset.what = videoWord();
     const big = stage.querySelector('[data-bigplay-lbl]'); if (big) big.textContent = `${videoWord()}を再生`;
     const note = stage.querySelector('[data-note]'); if (note) note.textContent = src ? '' : 'ファイルがありません';
@@ -800,7 +841,8 @@
         const tq = findQ(g, el.dataset.key); if (!tq) break;
         if (confirm(`${tq.label} の記録（済・出題中）をリセットしますか？`)) {
           if (npIs(g, tq.key)) stopAudio();
-          { const v = videoOnStage(); if (v) v.pause(); }
+          { const v = videoOnStage(); if (v) { v.pause(); try { v.currentTime = 0; } catch (e) { /* 未読込 */ } } }
+          videoMode = 'q';   // 対動画：解答動画を流していても問題動画に戻す（再描画で <video> も問題動画の src で作り直される）
           P.resetQ(r, g.id, tq.key);
           subView = 'stages';
           toast(`${tq.label} をリセットしました`); rerender();

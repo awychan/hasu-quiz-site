@@ -16,6 +16,11 @@
   const CATEGORY_TYPES = [[/音声|イントロ|アウトロ/, 'audio'], [/歌詞/, 'audio'], [/動画|映像/, 'video'], [/文章|画像|1枚絵/, 'image']];
   const DEFAULT_CATEGORY = { audio: '楽曲・音声', video: '動画', image: '文章', mixed: '文章' };
   const CATEGORY_ORDER = ['楽曲・音声', '楽曲・歌詞', '動画', '文章'];
+  // ジャンルフォルダの先頭の _ 区切り（種別）がこれなら逆転ジャンル：全問を逆転として数え、TOP の並びは最後
+  const GYAKUTEN_CATEGORY = '逆転';
+  // 特別なテキスト（メモ・問題のファイルではない）：ジャンルフォルダの ルール.txt、問題フォルダの お題.txt
+  const RULES_FILE = 'ルール.txt', ODAI_FILE = 'お題.txt';
+  const isSpecial = (name, special) => nfc(name).toLowerCase() === special.toLowerCase();
 
   /* ---------- 名前の正規化 ---------- */
   // 照合用の名前：NFC ＋ 全角数字だけ半角に（① などの丸数字は残す）。URL は元の名前で作る
@@ -363,9 +368,11 @@
     const genres = [];
     for (const gnode of root.dirs.values()) {
       const meta = parseGenreName(gnode.raw);
+      const gyakuten = meta.category === GYAKUTEN_CATEGORY;
       const genre = {
         id: gnode.name, folder: gnode.raw, order: meta.order, name: meta.name,
-        category: meta.category, scoring: scoringOfLabel(meta.modeLabel), scoringLabel: meta.modeLabel || undefined,
+        category: meta.category, scoring: scoringOfLabel(meta.modeLabel) || (gyakuten ? 'deduct' : null), scoringLabel: meta.modeLabel || (gyakuten ? '減点方式' : undefined),
+        gyakuten, rulesSrc: null,
         type: null, round, base: u([roundName, gnode.raw].join('/'), base),
         questions: [], sections: [], summary: null, warnings: [],
       };
@@ -378,7 +385,10 @@
       // 葉（媒体ファイルを直接持つフォルダ）を処理する
       const processLeaf = (node, ctx) => {
         const notes = [], items = [];
-        node.files.forEach((f) => {
+        // お題.txt は問題のファイルではない（答えのメモにも未割り当てにも数えない）。このフォルダの問題すべてに付ける
+        const odaiFile = node.files.find((f) => isSpecial(f.raw, ODAI_FILE));
+        const odaiSrc = odaiFile ? srcOf(odaiFile.segs) : null;
+        node.files.filter((f) => f !== odaiFile).forEach((f) => {
           const kind = kindOfFile(f.raw);
           const c = classify(f.raw, kind === 'text');
           if (kind === 'text' && c.marker !== 'stage' && c.marker !== 'answer') notes.push(f);
@@ -401,7 +411,7 @@
           const tail = tailNumber(stemList[0].stem);
           const id = folderQ ? folderQ.id : tail != null ? tail : 1;
           const label = folderQ && folderQ.form === 'dai' ? `第${id}問` : `問題${id}`;
-          buildQuestion(stemList[0], { node, ctx, id, label, folderQ, notes, multi: false });
+          buildQuestion(stemList[0], { node, ctx, id, label, folderQ, notes, multi: false, odaiSrc });
         } else {
           if (notes.length) warn(gw, 'multi-stem-note', relOf(node.segs), `幹が ${stemList.length} 個あるフォルダのメモはどの問題にも付けません`);
           const tails = stemList.map((s) => tailNumber(s.stem));
@@ -410,7 +420,7 @@
             const id = useTails ? tails[i] : i + 1;
             // 番号付きの問題フォルダ（第5問 など）の中に幹が複数：キーは「<フォルダの番号>-<何番目か>」（他の問題フォルダの 1, 2 とぶつけない）
             const keyId = folderQ ? `${folderQ.id}-${i + 1}` : null;
-            buildQuestion(s, { node, ctx, id, keyId, label: `問題${id}`, folderQ: folderQ ? Object.assign({}, folderQ, { id: null }) : null, notes: [], multi: true });
+            buildQuestion(s, { node, ctx, id, keyId, label: `問題${id}`, folderQ: folderQ ? Object.assign({}, folderQ, { id: null }) : null, notes: [], multi: true, odaiSrc });
           });
         }
       };
@@ -494,7 +504,7 @@
 
         const q = {
           key, id: o.id, label: o.label, kind, stem: sg.stem, group, level,
-          scoring, scoringSource, scoringLabel, mode, format,
+          scoring, scoringSource, scoringLabel, mode, format, gyakuten, odaiSrc: o.odaiSrc || null,
           stages: stages.map((s) => ({ n: s.n, src: srcOf(s.segs), name: s.name, format: s.kind })),
           pair, answer, notes, points, pointsValue, tierRank,
           folder: leafPath, warnings: qw,
@@ -519,6 +529,9 @@
           visit(child, next);
         });
       };
+      // ジャンル直下の ルール.txt：問題の選択画面に出す。問題のファイルとしては読まない
+      const rulesFile = gnode.files.find((f) => isSpecial(f.raw, RULES_FILE));
+      if (rulesFile) { genre.rulesSrc = srcOf(rulesFile.segs); gnode.files = gnode.files.filter((f) => f !== rulesFile); }
       visit(gnode, { groups: [], level: null });
 
       // 並び：group（先頭の数字→名前）→ 級（初級→中級→上級）→ 番号
@@ -565,6 +578,7 @@
     }
 
     genres.sort((a, b) => {
+      if (a.gyakuten !== b.gyakuten) return a.gyakuten ? 1 : -1;   // 逆転ジャンルは番号があっても最後
       if (a.order != null || b.order != null) { if (a.order == null) return 1; if (b.order == null) return -1; if (a.order !== b.order) return a.order - b.order; }
       const ca = CATEGORY_ORDER.findIndex((c) => a.category.startsWith(c)), cb = CATEGORY_ORDER.findIndex((c) => b.category.startsWith(c));
       if (ca !== cb) return (ca < 0 ? 99 : ca) - (cb < 0 ? 99 : cb);

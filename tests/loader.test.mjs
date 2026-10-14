@@ -539,3 +539,27 @@ test('clearTextCache：メモを読み直す（読めなかった null も忘れ
   assert.equal(await L2.loadText('media/第1回/x/_ダミー.txt'), 'メモ');
   assert.equal(n, 2);
 });
+
+test('全角の「！」を含むジャンル名：NFC・ID・URL・進捗キーまで崩れない', () => {
+  const folder = '文章_テスト！ダミー_減点方式';
+  const r = parse([`${folder}/`, ...staged(`${folder}/問題1`, '画像1', 2), `${folder}/問題1/画像1_解答.png`]);
+  const g = only(r);
+  assert.equal(g.name, 'テスト！ダミー');
+  assert.equal(g.id, folder);
+  assert.ok(g.id.includes('！'));
+  assert.equal(g.questions[0].scoring, 'deduct');
+  // NFD のフォルダ名（濁点を分解）でも id は NFC にそろう
+  const nfd = '文章_テスト！ダミー_減点方式'.normalize('NFD');
+  assert.notEqual(nfd, folder);
+  const g2 = only(parse([`${nfd}/`, ...staged(`${nfd}/問題1`, '画像1', 1)]));
+  assert.equal(g2.id, folder);
+  assert.equal(g2.name, 'テスト！ダミー');
+  // URL ハッシュ：エンコード→デコードで元に戻る（app.js の enc / parseHash と同じ処理）
+  const hash = '#/' + ['第1回', g.id, g.questions[0].key].map(encodeURIComponent).join('/');
+  assert.ok(hash.includes('%EF%BC%81'));
+  const back = hash.replace(/^#\/?/, '').split('/').map(decodeURIComponent);
+  assert.equal(back[1].normalize('NFC'), g.id);
+  // 進捗キー（genre.id）として JSON を往復しても同じ
+  const prog = { [g.id]: { [g.questions[0].key]: { done: true } } };
+  assert.equal(JSON.parse(JSON.stringify(prog))[folder]['1'].done, true);
+});
