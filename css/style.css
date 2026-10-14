@@ -388,3 +388,18 @@ button.chip:disabled { cursor: default; }
 /* ---- キーボード操作：フォーカスの輪 ---- */
 button:focus-visible, a:focus-visible { outline: 3px solid var(--link); outline-offset: 2px; }
 .stage-tile:focus-visible, .clip-play:focus-visible { outline-offset: -4px; }
+
+/* ---- 逆転：お題.txt の箇条書き（格子の上の帯） ---- */
+.clip-odai { flex: none; display: flex; align-items: flex-start; gap: 14px; max-height: 88px; padding: 10px 20px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); }
+.clip-odai-lbl { flex: none; font-size: 13px; font-weight: 700; color: var(--red); line-height: 28px; }
+.odai-body { flex: 1; min-width: 0; max-height: 68px; overflow: auto; display: block; }
+.odai-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 2px 28px; font-family: var(--serif); font-weight: 700; font-size: 20px; line-height: 28px; word-break: keep-all; overflow-wrap: anywhere; }
+.odai-list li::before { content: "\2022"; color: var(--red); margin-right: 8px; }
+
+/* ---- 問題の選択画面：ルール.txt ---- */
+.sel.has-rules .sec.single { flex: none; }
+.sel.has-rules .sec.single .sec-grid { grid-auto-rows: 120px; }
+.rules-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 28px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); }
+.rules-head { flex: none; display: flex; align-items: baseline; gap: 12px; }
+.rules-title { font-family: var(--serif); font-weight: 700; font-size: 20px; }
+.rules-body { flex: 1; min-height: 0; overflow: auto; display: block; white-space: pre-wrap; font-size: 20px; line-height: 1.7; color: var(--text); }
