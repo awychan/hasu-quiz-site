@@ -189,7 +189,7 @@
   const audio = new Audio();
   let nowPlaying = null;            // { round, gid, key, n, label, points, rank }
   const lastPlayed = {};            // ジャンルごとに最後に流した段階（一覧型の「現在の点数」）
-  let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 回答動画
+  let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 解答動画
   let subView = 'stages';           // 段階ヒント画面：'stages' / 'video'（解答動画）
   let showReport = false;
   let scrollFocus = false;
@@ -687,8 +687,8 @@
     });
   }
 
-  /* ================= 対動画（問題動画／回答動画） ================= */
-  const videoWord = () => (videoMode === 'a' ? '回答動画' : '問題動画');
+  /* ================= 対動画（問題動画／解答動画） ================= */
+  const videoWord = () => (videoMode === 'a' ? '解答動画' : '問題動画');
   function renderVideoQuiz(g, q) {
     const pair = q.pair || {};
     const src = videoMode === 'a' ? pair.answer : pair.question;
@@ -700,20 +700,20 @@
       footer: `${btnBack(genreHref(g))}
         <div class="controls">
           <div class="controls-group"><span class="seg-label">いま流している動画</span>
-            <div class="segment"><button class="${videoMode === 'q' ? 'on' : ''}" data-action="video-mode" data-mode="q">問題動画</button><button class="${videoMode === 'a' ? 'on' : ''}" data-action="video-mode" data-mode="a">回答動画</button></div></div>
-          <button class="btn red lg" data-action="video-answer" ${pair.answer ? '' : 'disabled'}>${ICON.eye(19)}回答動画を再生</button>
+            <div class="segment"><button class="${videoMode === 'q' ? 'on' : ''}" data-action="video-mode" data-mode="q">問題動画</button><button class="${videoMode === 'a' ? 'on' : ''}" data-action="video-mode" data-mode="a">解答動画</button></div></div>
+          <button class="btn red lg" data-action="video-answer" ${pair.answer ? '' : 'disabled'}>${ICON.eye(19)}解答動画を再生</button>
           <button class="btn" data-action="video-restart" ${pair.question ? '' : 'disabled'}>${ICON.refresh(16)}問題動画を最初から</button>
         </div>
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${btnTop(g.round)}`,
     });
-    // 実際に流れ始めたら記録（'playing'）：問題動画 → 出題中、回答動画 → 出題済
+    // 実際に流れ始めたら記録（'playing'）：問題動画 → 出題中、解答動画 → 出題済
     wirePlayer(() => {
       const st = qst(g, q);
       if (videoMode === 'q') { if (!st.played) P.patch(g.round, g.id, q.key, { played: true }); } else if (!st.answer) P.setAnswer(g.round, g.id, q.key, true);
     }, videoWord);
   }
-  // 問題動画⇄回答動画を <video> を作り直さずに切り替える
+  // 問題動画⇄解答動画を <video> を作り直さずに切り替える
   function setVideoMode(q, mode) {
     videoMode = mode;
     const v = videoOnStage(); if (!v) return;
@@ -800,7 +800,8 @@
         const tq = findQ(g, el.dataset.key); if (!tq) break;
         if (confirm(`${tq.label} の記録（済・出題中）をリセットしますか？`)) {
           if (npIs(g, tq.key)) stopAudio();
-          { const v = videoOnStage(); if (v) v.pause(); }
+          { const v = videoOnStage(); if (v) { v.pause(); try { v.currentTime = 0; } catch (e) { /* 未読込 */ } } }
+          videoMode = 'q';   // 対動画：解答動画を流していても問題動画に戻す（再描画で <video> も問題動画の src で作り直される）
           P.resetQ(r, g.id, tq.key);
           subView = 'stages';
           toast(`${tq.label} をリセットしました`); rerender();
