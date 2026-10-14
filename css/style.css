@@ -177,7 +177,7 @@ button.chip:disabled { cursor: default; }
 
 /* ---- 動画 出題画面 ---- */
 .player { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 16px 20px; border-radius: 18px; background: var(--player); color: var(--player-text); overflow: hidden; }
-.player-top { position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center; }
+.player-top { position: relative; min-height: 28px; z-index: 2; display: flex; justify-content: space-between; align-items: center; }
 .player-note { font-size: 13px; font-weight: 700; color: var(--player-muted); }
 .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #05070F; }
 .bigplay-wrap { position: absolute; inset: 0; z-index: 2; display: grid; place-items: center; pointer-events: none; }
@@ -283,7 +283,7 @@ button.chip:disabled { cursor: default; }
 .sec-group { font-family: var(--serif); font-weight: 700; font-size: 22px; line-height: 1.2; }
 .sec-group.dim { color: #B5B5BE; font-size: 16px; }
 .sec-grid { flex: 1; min-width: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
-.sec.single .sec-grid { grid-auto-rows: minmax(104px, 1fr); }
+.sec.single .sec-grid { grid-auto-rows: 140px; align-content: start; }
 .sec.labeled .sec-grid { grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); grid-auto-rows: 100px; }
 .card.qc { display: flex; flex-direction: column; justify-content: space-between; padding: 14px 16px; box-shadow: 0 2px 10px rgba(30, 33, 64, .06); min-width: 0; }
 .card.qc:hover { box-shadow: 0 6px 18px rgba(30, 33, 64, .10); }
@@ -291,8 +291,6 @@ button.chip:disabled { cursor: default; }
 .qc-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
 .qname { font-family: var(--serif); font-weight: 700; font-size: 26px; line-height: 1.1; white-space: nowrap; }
 .qc-chips { display: flex; flex-wrap: wrap; gap: 4px; }
-.sec-grid .next-wrap { min-width: 0; }
-.next-wrap > .card.qc { flex: 1; box-shadow: none; border: 0; }
 
 /* ---- 段階ヒント画面 ---- */
 .main.staged { gap: 12px; }
