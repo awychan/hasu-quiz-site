@@ -407,7 +407,7 @@
         <div class="pill"><span style="display:inline-flex;align-items:center;gap:6px">${ICON.home(14)}${esc(rd.name)}</span><span class="pill-val">出題ジャンル</span></div>
         ${count(totals.started, totals.total)}`,
       main: `<div class="top-head"><div><span class="latin">GENRE SELECT</span><h1 class="page-title">出題ジャンルを選択</h1></div><span class="hint">パネルを押すと各ジャンルの出題画面へ</span></div>
-        <div class="genre-grid">${rd.genres.map(genreCard).join('')}${legendCard()}</div>`,
+        <div class="genre-grid">${rd.genres.map(genreCard).join('')}</div>`,
       footer: `<a class="btn ghost" href="#/">${ICON.back()}回の選択へ</a>
         <button class="btn ghost" data-action="reset-round">${ICON.refresh()}進捗をリセット</button>
         <button class="btn ghost ${showReport ? 'on' : ''}" data-action="toggle-report">${ICON.list()}読み込みレポート${rd.warnings && rd.warnings.length ? `<span class="tag">${rd.warnings.length}</span>` : ''}</button>
@@ -438,15 +438,6 @@
       <div class="card-bottom"><div class="sum-chips">${sum.join('')}</div>
         <div class="row"><div class="num ${complete ? 'done' : ''}">${started}<span>/ ${total}</span></div><span class="sub">出題済</span></div>
         <div class="bar-track"><div class="bar-fill ${complete ? 'done' : ''}" style="width:${pct}%"></div></div></div></a>`;
-  }
-  function legendCard() {
-    const tp = (rk) => (TIER_POINTS[rk - 1] != null ? TIER_POINTS[rk - 1] : '—');
-    const rows = [[1, 'ロゼ', 'スリーズブーケ'], [2, 'ブルー', 'DOLLCHESTRA'], [3, 'イエロー', 'みらくらぱーく！']];
-    const deductNote = [1, 2, 3].map((rk) => `${rk === 1 ? 'ヒント' : ''}${circled(rk)}${tp(rk)}点`).join('→');
-    const pointsNote = [1, 2, 3].map((rk) => `${levelName(rk)}${tp(rk)}点`).join('・');
-    return `<div class="card legend"><span class="latin">POINT COLORS</span>
-      <div class="legend-rows">${rows.map(([rk, color, unit]) => `<div class="legend-row"><span class="swatch ${tierClass(rk)}">${tp(rk)}点</span><span>${color}（${unit}）</span></div>`).join('')}</div>
-      <div class="legend-note">減点方式：${deductNote}<br>点数方式：${pointsNote}</div></div>`;
   }
   const WARN_LABEL = { unassigned: '割り当てなし', empty: '空のフォルダ', 'no-answer': '解答なし', 'stage-gap': '段階の抜け', 'mixed-media': '媒体の混在', 'multi-stem-note': 'メモの付け先なし', 'unknown-suffix': '不明な接尾辞', 'duplicate-key': 'キーの重複',
     'duplicate-name': '名前の重複', 'suffix-conflict': '接尾辞の食い違い', 'too-deep': '深すぎるフォルダ', unreadable: '一覧を読めない' };
