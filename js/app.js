@@ -275,12 +275,27 @@
     v.addEventListener('timeupdate', updateProgressUI); v.addEventListener('durationchange', updateProgressUI);
     v.addEventListener('error', () => {
       const src = v.getAttribute('src'); if (!src) return;
+      if (retrySeek(v, src)) return;
       const n = stage.querySelector('[data-note]'); if (n) n.textContent = 'ファイルを読み込めません';
       toast(fileErr(src, videoWhat())); syncVideoUI(pillWord);
     });
     v.addEventListener('click', toggleVideo);
     wireSeek(v);
     syncVideoUI(pillWord);
+  }
+  // Drive の未取得部分へのシークは読み込みが途中で切れて 'error' になることがある（初回再生時）。
+  // そのときは 1 回だけ読み込み直して、シーク先から（再生中だったなら再生も）続ける
+  function retrySeek(v, src) {
+    const t = Number(v.dataset.seekTo || NaN);
+    if (!isFinite(t) || v.dataset.retried === src) return false;
+    v.dataset.retried = src;
+    const resume = v.dataset.wasPlaying === '1';
+    v.addEventListener('loadedmetadata', () => {
+      v.currentTime = t;
+      if (resume) v.play().catch(videoPlayErr);
+    }, { once: true });
+    v.load();
+    return true;
   }
   // シークバー：クリック・ドラッグで移動。<video> と同様、描き直しのたびに作り直されるのでここで結び直す。
   // 座標は getBoundingClientRect（#stage の scale() を含んだ実寸）と比で扱う
@@ -303,6 +318,7 @@
       const r = track.getBoundingClientRect(); const d = v.duration;
       if (!r.width || !isFinite(d) || d <= 0) return;
       v.currentTime = Math.min(Math.max((e.clientX - r.left) / r.width, 0), 1) * d;
+      v.dataset.seekTo = String(v.currentTime); v.dataset.wasPlaying = v.paused ? '0' : '1';
       updateProgressUI();
     };
     track.addEventListener('pointerdown', (e) => {

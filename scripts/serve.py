@@ -32,6 +32,9 @@
   - 読み取り専用の GET / HEAD のみ。認証・HTTPS・CGI はなし。公開用ではない
     （--bind 0.0.0.0 にする場合は信頼できる LAN だけで）。
 
+  4. Drive のストリーミング ... 未取得の動画・音声を初めて配るとき、全体を裏で読んで
+     手元に落とす（WARM_EXTS）。未取得の位置へのシークで先頭に戻るのを防ぐ。
+
 アクセスログ: 1 リクエスト 1 行（時刻 メソッド パス ステータス 送信バイト 所要時間）。
 -q / --quiet で消せる。停止は Ctrl+C。
 """
@@ -54,6 +57,42 @@ DEFAULT_PORT = 8765
 DEFAULT_BIND = "127.0.0.1"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CHUNK = 256 * 1024
+
+# Google Drive for desktop の「ストリーミング」では、まだ落としていない部分を読むと
+# その場で取りに行くので、未読の位置へのシークは数秒〜十数秒かかり、ブラウザが
+# 読み込みを諦めて動画の先頭に戻ることがある（初回再生時だけ起きる）。
+# 動画・音声を初めて配るときに、ファイル全体を裏で 1 回読んで手元に落としておく。
+WARM_EXTS = (".mp4", ".m4v", ".mov", ".webm", ".mp3", ".m4a", ".wav", ".aac", ".ogg")
+_warm_lock = threading.Lock()
+_warmed = set()
+
+
+def _is_dataless(st):
+    """中身がまだ手元に無い（一部だけの）ファイルか。st_blocks が無い OS では False。"""
+    blocks = getattr(st, "st_blocks", None)
+    return blocks is not None and st.st_size > 0 and blocks * 512 < st.st_size
+
+
+def warm_file(path, st):
+    """未取得の媒体ファイルを裏のスレッドで最後まで読む（1 ファイル 1 回だけ）。"""
+    if not path.lower().endswith(WARM_EXTS) or not _is_dataless(st):
+        return
+    with _warm_lock:
+        if path in _warmed:
+            return
+        _warmed.add(path)
+
+    def run():
+        try:
+            with open(path, "rb") as f:
+                while f.read(1024 * 1024):
+                    pass
+        except OSError:
+            with _warm_lock:
+                _warmed.discard(path)  # 次のリクエストでもう一度試す
+
+    threading.Thread(target=run, name="warm", daemon=True).start()
+
 
 # 接続を相手が切ったときは静かに捨てる（動画のシークでは日常的に起きる）
 CLIENT_GONE = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout)
@@ -261,6 +300,7 @@ class QuizHandler(SimpleHTTPRequestHandler):
         try:
             st = os.fstat(f.fileno())
             size = st.st_size
+            warm_file(path, st)
             etag = '"%x-%x"' % (size, st.st_mtime_ns)
             last_modified = self.date_time_string(st.st_mtime)
             ctype = self.guess_type(path)
