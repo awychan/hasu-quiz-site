@@ -194,6 +194,48 @@ test('isStarted／isDone／countStarted', () => {
   assert.equal(P.countDone(genre), 1);
 });
 
+test('isCompleted：逆転ジャンルの逆転は流しただけでは出題済にならず、手動の done で出題済（それ以外の clips は従来どおり）', () => {
+  const P = loadProgress();
+  P.load(memStorage());
+  const gyaku = { key: 'g', mode: 'clips', gyakuten: true };      // 逆転ジャンルの 20 クリップ
+  const clips = { key: 'c', mode: 'clips', gyakuten: false };     // 逆転ジャンル以外の clips（答えの開閉あり）
+  const staged = { key: 's', mode: 'staged', gyakuten: true };    // 逆転ジャンルの段階ヒント問題
+  const pair = { key: 'p', mode: 'pair', gyakuten: false };
+  const completed = (q) => P.isCompleted(P.get('R', 'G', q.key), q);
+  const started = (q) => P.isStarted(P.get('R', 'G', q.key));
+  [gyaku, clips, staged, pair].forEach((q) => { assert.equal(completed(q), false); assert.equal(started(q), false); });
+
+  // クリップを流す：逆転ジャンルの逆転は「出題中」（出題済の数には入る）、それ以外の clips は従来どおり出題済
+  P.markClipPlayed('R', 'G', 'g', 1);
+  P.markClipPlayed('R', 'G', 'c', 1);
+  assert.equal(started(gyaku), true); assert.equal(completed(gyaku), false, '流しただけでは出題済にならない');
+  assert.equal(completed(clips), true, '逆転ジャンル以外の clips は流せば出題済のまま');
+  assert.equal(P.countStarted({ round: 'R', id: 'G', questions: [gyaku, clips] }), 2);
+
+  // 手動で出題済 → 取り消し（画面の「出題済にする」「取り消し」は done / answer を書き換える）
+  P.patch('R', 'G', 'g', { done: true });
+  assert.equal(completed(gyaku), true);
+  P.patch('R', 'G', 'g', { done: false, answer: false });
+  assert.equal(completed(gyaku), false, '取り消すと出題中に戻る');
+  assert.equal(started(gyaku), true, '流したクリップの記録は残る');
+  assert.deepEqual(P.playedClips(P.get('R', 'G', 'g')), [1]);
+
+  // 答えを開く操作が昔の記録に残っていても（stages）、それだけでは出題済にならない。answer があれば出題済
+  P.revealStage('R', 'G', 'g', 2);
+  assert.equal(completed(gyaku), false);
+  P.setAnswer('R', 'G', 'g', true);
+  assert.equal(completed(gyaku), true);
+
+  // 段階ヒント・対動画は isDone と同じ（解答を出したか手動で済）
+  P.revealStage('R', 'G', 's', 1); P.patch('R', 'G', 'p', { played: true });
+  assert.equal(completed(staged), false); assert.equal(completed(pair), false);
+  P.setAnswer('R', 'G', 's', true); P.patch('R', 'G', 'p', { done: true });
+  assert.equal(completed(staged), true); assert.equal(completed(pair), true);
+  // 問題の情報が無い（q が無い）ときも落ちない
+  assert.equal(P.isCompleted(P.get('R', 'G', 'x'), undefined), false);
+  assert.equal(P.isCompleted(undefined, undefined), false);
+});
+
 test('markClipPlayed：流したクリップの番号が保存され、再読み込みしても残る', () => {
   const P = loadProgress();
   const st = memStorage();

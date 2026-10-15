@@ -6,7 +6,7 @@
  *   clips  … 逆転で流したクリップの番号（markClipPlayed。再読み込みしても済の印が残る。流したことが無ければ無い）
  *   answer … 解答を表示した／回答動画を再生した
  *   played … 何かを再生した（対動画の問題動画、逆転のクリップ）
- *   done   … 手動で出題済にした
+ *   done   … 手動で出題済にした（逆転ジャンルのクリップ問題は、この印で出題済にする：patch(…, { done: true/false })）
  *
  * v3 が無く v2（hasu-quiz-progress-v2）があれば起動時に 1 回だけ移行する（v2 はそのまま残す）。
  * 回・ジャンル・キーは NFC にそろえる（v2 はディスク上の名前のままで、NFD のフォルダ名があった）。
@@ -211,6 +211,10 @@
   // 段階ヒント・逆転：解答を出したか手動で済。対動画：回答動画を再生したか手動で済
   // eslint-disable-next-line no-unused-vars
   const isDone = (st, q) => !!(st && (st.done || st.answer));
+  // 問題の選択カードに「出題済」と出す判定。段階ヒント・対動画は isDone と同じ。
+  // 逆転（clips）は、クリップを流すか答えを開いた時点で出題済（isStarted）。ただし逆転ジャンル（q.gyakuten）の clips は
+  // 答えを開く操作が無いので、流しただけでは「出題中」とし、出題済は手動（done。画面の「出題済にする」）で付ける
+  const isCompleted = (st, q) => (q && q.mode === 'clips' && !q.gyakuten ? isStarted(st) : isDone(st, q));
   function entryOf(store, genre, q) { return ((((store || state)[genre.round] || {})[genre.id] || {})[q.key]) || null; }
   const countStarted = (genre, store) => (genre.questions || []).filter((q) => isStarted(entryOf(store, genre, q))).length;
   const countDone = (genre, store) => (genre.questions || []).filter((q) => isDone(entryOf(store, genre, q), q)).length;
@@ -218,7 +222,7 @@
   root.QuizProgress = {
     KEY, OLD_KEY,
     load, reload, save, onSaveFail, get, patch, revealStage, undoStage, clearStage, markClipPlayed, setAnswer, resetQ, resetRound, resolveV2Pairs,
-    revealed, playedClips, isStarted, isDone, countStarted, countDone,
+    revealed, playedClips, isStarted, isDone, isCompleted, countStarted, countDone,
     state: () => state,
     migratedFromV2: () => migrated,
     _internal: { migrateV2, migrateKey, migrateEntry, mergeEntry, v2PairKeys },
