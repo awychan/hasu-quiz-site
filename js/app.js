@@ -67,7 +67,6 @@
     close: (s = 15) => svg('<path d="M6 6l12 12M18 6 6 18"></path>', s),
     swap: (s = 15) => svg('<path d="M4 8h14"></path><path d="m14 4 4 4-4 4"></path><path d="M20 16H6"></path><path d="m10 12-4 4 4 4"></path>', s),
   };
-  const fmtIcon = (f, s) => (f === 'video' ? ICON.video(s) : f === 'audio' ? ICON.music(s) : f === 'text' ? ICON.text(s) : ICON.image(s));
   const catIcon = (g, s) => { if (g.gyakuten) return ICON.swap(s); const t = g.type === 'mixed' || !g.type ? g.majorFormat : g.type; return t === 'video' ? ICON.video(s) : t === 'image' ? ICON.text(s) : ICON.music(s); };
 
   /* ---------------- 進捗（js/progress.js） ---------------- */
@@ -86,8 +85,11 @@
   const stageSeq = (q) => { const ns = q.stages.map((s) => circled(s.n)); return ns.length > 5 ? `${ns.slice(0, 3).join('→')}→…→${ns[ns.length - 1]}` : ns.join('→'); };
   function roundTotals(rd) { return rd.genres.reduce((a, g) => { a.started += P.countStarted(g); a.total += g.questions.length; return a; }, { started: 0, total: 0 }); }
   const findQ = (g, key) => (g.questions || []).find((q) => q.key === key) || null;
-  // 逆転はクリップを流すか答えを開いたら出題済（それ以外は解答を出したか手動で済）
-  const qDone = (st, q) => (q.mode === 'clips' ? P.isStarted(st) : P.isDone(st, q));
+  // 逆転はクリップを流すか答えを開いたら出題済（それ以外は解答を出したか手動で済）。
+  // ただし逆転ジャンルの逆転は答えを開く操作が無いので、流すと出題中、出題済は手動（js/progress.js の isCompleted）
+  const qDone = P.isCompleted;
+  // 逆転ジャンルの逆転（番号付きクリップ）：メモの ①〜⑳ の行は答えではなくクリップごとの組み合わせ
+  const isGyakutenClips = (q) => !!(q && q.mode === 'clips' && q.gyakuten);
   // 音声の一覧型（仕様書タブ2）：ジャンル内の全問題が「段階・音声・減点・3 段階以下」のとき
   const isAudioList = (g) => g.questions.length > 0 && g.questions.every((q) => q.mode === 'staged' && q.format === 'audio' && q.scoring === 'deduct' && q.stages.length <= TIER_POINTS.length);
 
@@ -107,10 +109,6 @@
   const btnBack = (href) => `<a class="btn" href="${href}">${ICON.back()}戻る</a>`;
   const progressBar = (cls = '', seekable = false) => `<div class="progress ${cls}"><span class="t" data-t="cur">0:00</span><div class="bar-track${seekable ? ' seekable' : ''}"${seekable ? ' data-seek role="slider" aria-label="再生位置"' : ''}><div class="bar-fill" data-fill></div>${seekable ? '<div class="bar-thumb" data-thumb></div>' : ''}</div><span class="t" data-t="dur">0:00</span></div>`;
   const sourceLabel = (s) => (s === 'list' ? '読み込み用ファイル.txt' : s === 'listing' ? 'サーバーのフォルダ一覧' : s === 'probe' ? 'フォルダを順に探索' : '—');
-  const hasAnswer = (q) => !!(q.answer && (q.answer.image || q.answer.audio || q.answer.video || q.answer.text || q.answer.textSrc));
-  // 選択カードの段階数：1 段階だけの問題は問題画面と同じ「問題①」（解答があれば「＋解答」）
-  const stageCountText = (q) => (q.mode === 'pair' ? '動画' : q.mode === 'clips' ? `${q.stages.length}クリップ`
-    : q.stages.length === 1 ? `${stageName(q, q.stages[0].n)}${hasAnswer(q) ? '＋解答' : ''}` : `ヒント${q.stages.length}段階`);
 
   // 描き直しの前後でフォーカスを保つ：同じ data-action / data-n / data-key / data-mode のボタンに戻す（キーボード操作用）
   function focusDesc(el) {
@@ -150,24 +148,25 @@
       L.loadText(url).then((t) => {
         if (gen !== textGen) return;
         texts.set(url, t); pendingTexts.delete(url); fillTexts(url);
-        if (cur.q && cur.q.mode === 'clips' && cur.q.answer.textSrc === url && !videoOnStage()) rerender();   // 逆転：メモ全文の帯はメモが読めてから決まる
+        // 逆転：メモ全文の帯はメモが読めてから決まる（逆転ジャンルの逆転は帯を出さず、fillTexts で組み合わせが入るので描き直さない）
+        if (cur.q && cur.q.mode === 'clips' && !isGyakutenClips(cur.q) && cur.q.answer.textSrc === url && !videoOnStage()) rerender();
       });
     }
     return undefined;
   }
-  function noteLines(t) {
-    const map = {};
-    String(t || '').split(/\r?\n/).forEach((line) => {
-      const m = line.trim().match(/^([①-⑳㉑-㉟])[\s　:：.、．]*(.*)$/);
-      if (m) map[circledNum(m[1])] = m[2];
-    });
-    return map;
-  }
+  // メモの ①〜⑳ の行 → { 番号: 本文 }（純関数なので js/loader.js にあり、tests/gyakuten.test.mjs で試している）
+  const noteLines = L.noteLines;
   // 「・」と空白の後ろで折り返せるように <wbr> を入れる（単語の途中では折らない：CSS の word-break: keep-all と組み合わせる）
   const wbr = (html) => html.replace(/([・\s　])/g, '$1<wbr>');
   const firstLine = (t) => (String(t || '').split(/\r?\n/).map((s) => s.trim()).find((s) => s && !circledNum(s[0])) || '');
   // お題.txt：1 行 1 つ。BOM・CRLF・空行・前後の空白は無視
   const odaiLines = (t) => String(t || '').replace(/^\uFEFF/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  // 逆転の組み合わせ：「・」で区切った項目を 1 項目 1 行の箇条書きに。項目が 4 つ以上、または 8 文字以上の項目があるときは
+  // dense（字を小さくして収める）。3 項目・7 文字までなら 21px のまま 1 行ずつに収まる（css の「逆転ジャンルの逆転」）
+  function comboHtml(items) {
+    const dense = items.length > 3 || items.some((s) => [...s].length > 7);
+    return `<span class="combo-list${dense ? ' dense' : ''}">${items.map((s) => `<span class="combo-item">${wbr(esc(s))}</span>`).join('')}</span>`;
+  }
   function textPart(t, part) {
     if (t === undefined) return '<span class="muted">読み込み中…</span>';
     if (t === null) return `<span class="muted">${part === 'odai' ? '（お題.txt を読めません）' : part === 'rules' ? '（ルール.txt を読めません）' : '（メモを読めません）'}</span>`;
@@ -176,6 +175,13 @@
     if (part === 'odai') { const ls = odaiLines(t); return ls.length ? `<ul class="odai-list">${ls.map((l) => `<li>${wbr(esc(l))}</li>`).join('')}</ul>` : '<span class="muted">（お題.txt が空です）</span>'; }
     const m = /^clip:(\d+)$/.exec(part || '');
     if (m) { const line = noteLines(t)[Number(m[1])]; return line != null ? wbr(esc(line)) : '<span class="muted">（この番号の行がありません）</span>'; }
+    const cm = /^combo:(\d+)$/.exec(part || '');
+    if (cm) {
+      const line = noteLines(t)[Number(cm[1])];
+      if (line == null) return '<span class="muted">（メモにこの番号の行がありません）</span>';
+      const items = L.comboItems(line);
+      return items.length ? comboHtml(items) : '<span class="muted">（組み合わせが空です）</span>';
+    }
     return esc(t).replace(/\n/g, '<br>');
   }
   const textSpan = (url, part, cls = '') => `<span class="${cls}" data-text-src="${esc(url)}" data-text-part="${esc(part)}">${textPart(textOf(url), part)}</span>`;
@@ -486,12 +492,12 @@
   }
   // ジャンルフォルダの ルール.txt を問題カードの下の空きに出す（改行はそのまま）
   const rulesPanel = (g) => `<aside class="rules-panel"><div class="rules-head"><span class="latin">RULES</span><span class="rules-title">ルール</span></div>${textSpan(g.rulesSrc, 'rules', 'rules-body')}</aside>`;
+  // 問題カードは問題名と状態だけ。種別・方式・形式・ヒントの段階数のチップは、開く前に問題の中身が分かってしまうので全ジャンルで出さない
   function qCard(g, q) {
     const st = qst(g, q); const started = P.isStarted(st); const done = qDone(st, q);
     const status = done ? chip(ICON.check(13) + '出題済', 'done') : started ? chip('出題中', 'playing') : chip('未出題');
     return `<a class="card qc ${done ? 'complete' : ''}" href="${qHref(g, q.key)}" data-key="${esc(q.key)}">
-      <div class="qc-top"><span class="qname">${esc(q.label)}</span>${status}</div>
-      ${g.gyakuten ? '' : `<div class="qc-chips">${q.kind ? chip(esc(q.kind), 'sm') : ''}${chip(esc(q.mode === 'clips' ? '逆転' : scoringLabel(q)), 'sm')}${chip(fmtIcon(q.format, 12) + esc(stageCountText(q)), 'sm')}</div>`}</a>`;
+      <span class="qname">${esc(q.label)}</span>${status}</a>`;
   }
 
   /* ================= 段階ヒント画面（画像・音声・歌詞画像） ================= */
@@ -684,14 +690,26 @@
   }
 
   /* ================= 逆転（clips） ================= */
+  // 逆転ジャンルの逆転：出題済は手動。クリップを流すと「出題中」、「出題済にする」で出題済、「取り消し」で出題中に戻す
+  function doneControl(q, st) {
+    if (qDone(st, q)) return `<div class="stage-item"><button class="btn shown" disabled>${ICON.check()}出題済</button><button class="undo-btn" data-action="unmark-done" data-key="${esc(q.key)}">${ICON.undo(12)}取り消し</button></div>`;
+    const started = P.isStarted(st);
+    return `<button class="btn" data-action="mark-done" data-key="${esc(q.key)}" ${started ? '' : 'disabled'} title="${started ? '出題済にする' : 'クリップを再生すると押せます'}">${ICON.check()}出題済にする</button>`;
+  }
   function renderClipsQuiz(g, q) {
     const st = qst(g, q);
     const np = npIs(g, q.key) ? nowPlaying : null;
+    const gy = isGyakutenClips(q);   // 逆転ジャンル：メモの ①〜⑳ の行は答えではなく組み合わせ。各カードに最初から出し、答えの開閉は無い
     const opened = shownNs(q, st).length;
     const tiles = q.stages.map((s) => {
       const open = !!st.stages[s.n]; const playing = np && np.n === s.n;
       const played = !!(st.clips && st.clips[s.n]);
       const ic = playing ? (audio.paused ? ICON.pause(18) : ICON.wave(20)) : played ? ICON.check(18) : ICON.play(16);
+      if (gy) {
+        const combo = q.answer.textSrc ? textSpan(q.answer.textSrc, `combo:${s.n}`, 'clip-combo') : '<span class="clip-combo"><span class="muted">（メモがありません）</span></span>';
+        return `<div class="clip-tile combo ${playing ? 'playing' : ''} ${played ? 'played' : ''}">
+        <button class="clip-play" data-action="clip-play" data-n="${s.n}" aria-label="${circled(s.n)}を再生"><span class="clip-pad"><span class="clip-num">${circled(s.n)}</span><span class="clip-ic">${ic}</span></span>${combo}</button></div>`;
+      }
       return `<div class="clip-tile ${playing ? 'playing' : ''} ${played ? 'played' : ''} ${open ? 'open' : ''}">
         <button class="clip-play" data-action="clip-play" data-n="${s.n}" aria-label="${circled(s.n)}を再生"><span class="clip-num">${circled(s.n)}</span><span class="clip-ic">${ic}</span></button>
         <div class="clip-ans">${open
@@ -704,17 +722,17 @@
     // メモに行が無い番号の答えを開いたときだけ、メモ全文を 1 回だけ出す（開く前に出すと他の番号の答えが見えてしまう）
     const noteText = q.answer.textSrc ? textOf(q.answer.textSrc) : undefined;
     const lines = typeof noteText === 'string' ? noteLines(noteText) : null;
-    const noteStrip = lines && q.stages.some((s) => st.stages[s.n] && lines[s.n] == null)
+    const noteStrip = !gy && lines && q.stages.some((s) => st.stages[s.n] && lines[s.n] == null)
       ? `<div class="clip-note" data-clip-note><span class="clip-note-lbl">メモ</span><div class="clip-note-body">${textSpan(q.answer.textSrc, 'all')}</div></div>` : '';
     const rows = Math.ceil(q.stages.length / 5);
     render({
       header: quizHead(g, q, chip('逆転') + levelChip(q))
         + (q.odaiSrc ? '' : `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`)
-        + `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`,
+        + (gy ? '' : `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`),
       cls: 'clips',
       main: `${odai}${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
       footer: `${btnBack(genreHref(g))}
-        <button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>
+        ${gy ? doneControl(q, st) : `<button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>`}
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${npBlock(np)}${btnTop(g.round)}`,
     });
@@ -828,6 +846,7 @@
       case 'stop': stopAudio(); refresh(); break;
       case 'audio-toggle': toggleAudio(); refresh(); break;
       case 'mark-done': P.patch(r, g.id, el.dataset.key, { done: true }); rerender(); break;
+      case 'unmark-done': P.patch(r, g.id, el.dataset.key, { done: false, answer: false }); rerender(); break;   // 逆転ジャンルの逆転：出題済 → 出題中に戻す
       case 'reset-q': {
         const tq = findQ(g, el.dataset.key); if (!tq) break;
         if (confirm(`${tq.label} の記録（済・出題中）をリセットしますか？`)) {

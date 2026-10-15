@@ -296,6 +296,24 @@
     return rank ? { label: k, rank, points: TIER_POINTS[rank - 1] != null ? TIER_POINTS[rank - 1] : null } : null;
   };
 
+  /* ---------- メモ txt の読み取り（純関数。画面側の描画は js/app.js） ---------- */
+  // 丸数字（①〜⑳・㉑〜㉟）→ 番号。丸数字でなければ null
+  const circledNum = (ch) => { const c = String(ch || '').charCodeAt(0); return c >= 0x2460 && c <= 0x2473 ? c - 0x2460 + 1 : c >= 0x3251 && c <= 0x325F ? c - 0x3251 + 21 : null; };
+  // メモの全文 → { 番号: その行の本文 }。行頭が丸数字の行だけを拾い、丸数字の直後の空白・「: ： . 、 ．」は本文に含めない。同じ番号が続けば後の行
+  function noteLines(text) {
+    const map = {};
+    String(text == null ? '' : text).split(/\r?\n/).forEach((line) => {
+      const t = line.trim();
+      const n = circledNum(t.charAt(0));
+      if (n != null) map[n] = t.slice(1).replace(/^[\s　:：.、．]*/, '');
+    });
+    return map;
+  }
+  // 逆転の組み合わせ：メモの 1 行の本文（例：A・B・C）を「・」で区切った項目に分ける。前後の空白（全角も）は落とし、空の項目は捨てる
+  function comboItems(line) {
+    return String(line == null ? '' : line).split('・').map((s) => s.trim()).filter(Boolean);
+  }
+
   /* ---------- 回の組み立て（純関数） ---------- */
   // files：回フォルダからの相対パス。末尾が「/」の行はフォルダ（空フォルダを見つけるため）
   function parse(roundName, files, opts) {
@@ -606,7 +624,7 @@
   function clearTextCache() { textCache.clear(); }
 
   window.QuizLoader = {
-    discoverRounds, loadRound, loadText, clearTextCache, base: () => BASE, baseInfo, LIST, parse,
+    discoverRounds, loadRound, loadText, clearTextCache, base: () => BASE, baseInfo, LIST, parse, noteLines, comboItems,
     // 検査用（scripts/check_media.mjs・tests）
     _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, levelOf, stripPrefix, trimSep, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS, MARK_TOO_DEEP, MARK_UNREADABLE },
   };

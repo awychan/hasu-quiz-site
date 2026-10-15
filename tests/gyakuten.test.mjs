@@ -81,3 +81,52 @@ test('一覧ファイル（読み込み用ファイル.txt）経由でも お題
   assert.ok(g.rulesSrc); assert.ok(g.questions[0].odaiSrc);
   assert.ok(!r.warnings.some((w) => w.type === 'unassigned'));
 });
+
+/* ---- 逆転ジャンルの逆転：メモの ①〜⑳ の行はクリップごとの組み合わせ（js/app.js の isGyakutenClips が見る q.mode / q.gyakuten / answer.textSrc） ---- */
+test('逆転ジャンルの 20 クリップ＋メモ：mode は clips・gyakuten・メモの場所が answer.textSrc に入る', () => {
+  const g = only(parse([...staged('逆転_テスト_減点方式/第3問', 'クリップ', 20, 'mp3'), '逆転_テスト_減点方式/第3問/_ダミー題名.txt']));
+  const q = g.questions[0];
+  assert.equal(q.mode, 'clips'); assert.equal(q.gyakuten, true);
+  assert.ok(q.answer.textSrc.endsWith(encodeURIComponent('_ダミー題名.txt')));
+  assert.equal(q.stages.length, 20);
+});
+
+test('逆転ジャンル以外の 20 クリップ＋メモは clips のまま gyakuten が false（従来の「答え」の開閉の画面）', () => {
+  const q = q1(parse([...staged('文章_テスト_減点方式/第3問', 'クリップ', 20, 'mp3'), '文章_テスト_減点方式/第3問/_ダミー題名.txt']));
+  assert.equal(q.mode, 'clips'); assert.equal(q.gyakuten, false);
+});
+
+test('noteLines：行頭の丸数字ごとに本文を拾う（直後の区切り・CRLF・空行・番号の無い行を扱う）', () => {
+  const memo = 'ダミー題名・ダミーA\r\n\r\n①ダミーA・ダミーB・ダミーC\r\n② ダミーD　・ダミーE\r\n③：ダミーF\r\n④、ダミーG\r\n⑳ダミーH\r\n㉑ダミーI\r\nダミー⑤ダミーJ\r\n番号の無い行・ダミー';
+  assert.deepEqual(L.noteLines(memo), { 1: 'ダミーA・ダミーB・ダミーC', 2: 'ダミーD　・ダミーE', 3: 'ダミーF', 4: 'ダミーG', 20: 'ダミーH', 21: 'ダミーI' });
+});
+
+test('noteLines：LF だけ・前後の空白・空の本文・同じ番号は後の行・空／null は空', () => {
+  assert.deepEqual(L.noteLines('  ①ダミーA  \n②\n①ダミーB'), { 1: 'ダミーB', 2: '' });
+  assert.deepEqual(L.noteLines(''), {});
+  assert.deepEqual(L.noteLines(null), {});
+  assert.deepEqual(L.noteLines(undefined), {});
+});
+
+test('comboItems：「・」で区切った項目にする（前後の空白は全角も落とし、空の項目は捨てる）', () => {
+  assert.deepEqual(L.comboItems('ダミーA・ダミーB・ダミーC'), ['ダミーA', 'ダミーB', 'ダミーC']);
+  assert.deepEqual(L.comboItems(' ダミーA ・　ダミーB　・'), ['ダミーA', 'ダミーB']);
+  assert.deepEqual(L.comboItems('・ダミーA・・ダミーB・'), ['ダミーA', 'ダミーB']);
+  assert.deepEqual(L.comboItems('ダミーA'), ['ダミーA']);
+  assert.deepEqual(L.comboItems(''), []);
+  assert.deepEqual(L.comboItems('・・'), []);
+  assert.deepEqual(L.comboItems(null), []);
+});
+
+test('comboItems：順番と重複はそのまま、「・」以外（、 / スペース）では分けない', () => {
+  assert.deepEqual(L.comboItems('ダミーB・ダミーA・ダミーB'), ['ダミーB', 'ダミーA', 'ダミーB']);
+  assert.deepEqual(L.comboItems('ダミーA、ダミーB/ダミーC ダミーD'), ['ダミーA、ダミーB/ダミーC ダミーD']);
+});
+
+test('メモの 1 行 → 組み合わせ：noteLines と comboItems をつなぐ（番号の無い先頭行は使わない）', () => {
+  const memo = ['ダミーA・ダミーB・ダミーC・ダミーD', '', '①ダミーA・ダミーB・ダミーC', '②ダミーB・ダミーD・ダミーA'].join('\r\n');
+  const lines = L.noteLines(memo);
+  assert.deepEqual(L.comboItems(lines[1]), ['ダミーA', 'ダミーB', 'ダミーC']);
+  assert.deepEqual(L.comboItems(lines[2]), ['ダミーB', 'ダミーD', 'ダミーA']);
+  assert.equal(lines[3], undefined, 'メモに無い番号は undefined（画面は「行がありません」と出す）');
+});
