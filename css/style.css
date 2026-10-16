@@ -400,14 +400,13 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--link); outline-
 .rules-head { flex: none; display: flex; align-items: baseline; gap: 12px; }
 .rules-title { font-family: var(--serif); font-weight: 700; font-size: 20px; }
 .rules-body { flex: 1; min-height: 0; overflow: auto; display: block; white-space: pre-wrap; font-size: 20px; line-height: 1.7; color: var(--text); }
-.rules-panel.is-image { padding: 0; background: transparent; border: 0; }
-.rules-img { position: relative; flex: 1; min-height: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: zoom-in; }
-.rules-img img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
-.rules-img:focus-visible { outline: 2px solid var(--link); outline-offset: 3px; }
-.rules-zoom-hint { position: absolute; right: 0; bottom: 0; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 999px; background: var(--chip); color: var(--chip-text); font-size: 13px; font-weight: 700; }
-.rules-zoom { position: absolute; inset: 0; z-index: 6; display: flex; align-items: center; justify-content: center; padding: 28px; background: rgba(30, 33, 64, .86); cursor: zoom-out; }
-.rules-zoom img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 12px; box-shadow: 0 10px 40px rgba(0, 0, 0, .35); }
-.rules-close { position: absolute; top: 18px; right: 18px; }
+.rules-panel.is-image { position: relative; padding: 0; background: transparent; border: 0; }
+.rules-panel.is-image img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+/* ルールの画像があるジャンル（区分なし）：問題カードを左に 1 列（ほかの画面と同じ幅・高さ）、残りの全部をルールの画像に */
+.sel.side { flex-direction: row; gap: 24px; overflow: hidden; }
+.sel.side .sec.single { flex: none; width: calc((100% - 4 * 12px) / 5); min-height: 0; overflow-y: auto; }
+.sel.side .sec.single .sec-grid { grid-template-columns: minmax(0, 1fr); }
+.sel.side .rules-panel { flex: 1; min-width: 0; }
 
 /* ---- 逆転ジャンルの逆転：クリップのカードに組み合わせ（メモの ①〜⑳ の行）を箇条書きで常に出す ----
    1440×810 で 20 枚（5×4）：カードは約 257×126〜136px。左に番号と再生の印（46px）、右に最大 3 行の箇条書き（21px の明朝で 7 文字まで 1 行に収まる） */
