@@ -202,7 +202,6 @@
   let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 解答動画
   let subView = 'stages';           // 段階ヒント画面：'stages' / 'video'（解答動画）
   let showReport = false;
-  let rulesZoom = false;            // ジャンル画面：ルールの画像を全画面で見ているか
   let scrollFocus = false;
   let cur = { round: null, genre: null, q: null };
 
@@ -503,18 +502,17 @@
     }).join('');
     render({
       header: hdrLeft(g.name, genreChips(g)) + pill('問題を選択', `${total}問`) + count(started, total),
-      main: `<div class="sel ${labeled ? 'labeled' : ''} ${hasRules(g) ? 'has-rules' : ''}">${html}${hasRules(g) ? rulesPanel(g) : ''}</div>`,
+      // ルールの画像があるジャンル（区分なし）は、問題カードを左に 1 列で並べ、残りの全部をルールの画像にする
+      main: `<div class="sel ${labeled ? 'labeled' : ''} ${hasRules(g) ? 'has-rules' : ''} ${g.rulesImage && !labeled ? 'side' : ''}">${html}${hasRules(g) ? rulesPanel(g) : ''}</div>`,
       footer: `<span class="spacer"></span>${btnTop(g.round)}`,
-      overlay: rulesZoom && g.rulesImage ? rulesZoomView(g) : '',
     });
   }
-  // ジャンルフォルダの ルール.txt（改行はそのまま）か ルール.png などの画像を、問題カードの下の空きに出す。
-  // 画像はクリックで全画面に拡大（クリックか Esc で閉じる）。両方あれば画像
+  // ジャンルフォルダの ルール.txt（問題カードの下の空きに、改行はそのまま）か ルール.png などの画像（カードの右の空きいっぱいに）を出す。
+  // 両方あれば画像
   const hasRules = (g) => !!(g.rulesImage || g.rulesSrc);
   const rulesPanel = (g) => (g.rulesImage
-    ? `<aside class="rules-panel is-image"><button class="rules-img" data-action="rules-zoom" aria-label="ルールを拡大" title="クリックで拡大"><img src="${esc(g.rulesImage)}" alt="ルール"><span class="rules-zoom-hint">${ICON.expand(14)}拡大</span></button></aside>`
+    ? `<aside class="rules-panel is-image"><img src="${esc(g.rulesImage)}" alt="ルール"></aside>`
     : `<aside class="rules-panel"><div class="rules-head"><span class="latin">RULES</span><span class="rules-title">ルール</span></div>${textSpan(g.rulesSrc, 'rules', 'rules-body')}</aside>`);
-  const rulesZoomView = (g) => `<div class="rules-zoom" data-action="rules-close"><img src="${esc(g.rulesImage)}" alt="ルール"><button class="icon-btn rules-close" data-action="rules-close" aria-label="閉じる" title="閉じる（Esc）">${ICON.close(18)}</button></div>`;
   // 問題カードは問題名と状態だけ。種別・方式・形式・ヒントの段階数のチップは、開く前に問題の中身が分かってしまうので全ジャンルで出さない
   function qCard(g, q) {
     const st = qst(g, q); const started = P.isStarted(st); const done = qDone(st, q);
@@ -832,7 +830,7 @@
     if (q.mode === 'clips') return renderClipsQuiz(genre, q);
     return renderStagedQuiz(genre, q);
   }
-  function route() { stopMedia(); videoMode = 'q'; subView = 'stages'; showReport = false; rulesZoom = false; scrollFocus = true; draw(); scrollFocus = false; window.scrollTo(0, 0); }
+  function route() { stopMedia(); videoMode = 'q'; subView = 'stages'; showReport = false; scrollFocus = true; draw(); scrollFocus = false; window.scrollTo(0, 0); }
   function rerender() { draw(); }
 
   /* ---------------- 操作 ---------------- */
@@ -863,8 +861,6 @@
         if (confirm(`${r} のすべての進捗（出題済の記録）をリセットしますか？`)) { stopAudio(); P.resetRound(r); toast(`${r} の進捗をリセットしました`); rerender(); }
         break;
       case 'toggle-report': showReport = !showReport; rerender(); break;
-      case 'rules-zoom': rulesZoom = true; rerender(); break;
-      case 'rules-close': rulesZoom = false; rerender(); break;
       case 'fullscreen':
         if (document.fullscreenElement) document.exitFullscreen(); else document.documentElement.requestFullscreen().catch(() => toast('全画面にできません'));
         break;
@@ -987,7 +983,6 @@
       if (videoOnStage()) { toggleVideo(); return; }
       toggleAudio(); rerender();
     } else if (e.key === 'Escape') {
-      if (rulesZoom) { rulesZoom = false; rerender(); return; }
       if (showReport) { showReport = false; rerender(); return; }
       // 画面の「戻る」と同じく 1 階層上へ：問題 → ジャンル画面 → TOP → 回の選択
       // （音源一覧はジャンル画面そのもので、キーは選択位置だけなので TOP へ）
