@@ -21,6 +21,8 @@
   // 特別なテキスト（メモ・問題のファイルではない）：ジャンルフォルダの ルール.txt、問題フォルダの お題.txt
   const RULES_FILE = 'ルール.txt', ODAI_FILE = 'お題.txt';
   const isSpecial = (name, special) => nfc(name).toLowerCase() === special.toLowerCase();
+  // ジャンル直下の ルール.png／.jpg／.webp など（画像のルール）。ルール.txt と同じく選択画面に出す（両方あれば画像）
+  const isRulesImage = (name) => { const n = nfc(name); return IMAGE_EXT.test(n) && n.replace(/\.[^.]+$/, '') === 'ルール'; };
 
   /* ---------- 名前の正規化 ---------- */
   // 照合用の名前：NFC ＋ 全角数字だけ半角に（① などの丸数字は残す）。URL は元の名前で作る
@@ -390,7 +392,7 @@
       const genre = {
         id: gnode.name, folder: gnode.raw, order: meta.order, name: meta.name,
         category: meta.category, scoring: scoringOfLabel(meta.modeLabel) || (gyakuten ? 'deduct' : null), scoringLabel: meta.modeLabel || (gyakuten ? '減点方式' : undefined),
-        gyakuten, rulesSrc: null,
+        gyakuten, rulesSrc: null, rulesImage: null,
         type: null, round, base: u([roundName, gnode.raw].join('/'), base),
         questions: [], sections: [], summary: null, warnings: [],
       };
@@ -547,9 +549,11 @@
           visit(child, next);
         });
       };
-      // ジャンル直下の ルール.txt：問題の選択画面に出す。問題のファイルとしては読まない
+      // ジャンル直下の ルール.txt・ルール.png など：問題の選択画面に出す。問題のファイルとしては読まない
       const rulesFile = gnode.files.find((f) => isSpecial(f.raw, RULES_FILE));
       if (rulesFile) { genre.rulesSrc = srcOf(rulesFile.segs); gnode.files = gnode.files.filter((f) => f !== rulesFile); }
+      const rulesImage = gnode.files.find((f) => isRulesImage(f.raw));
+      if (rulesImage) { genre.rulesImage = srcOf(rulesImage.segs); gnode.files = gnode.files.filter((f) => f !== rulesImage); }
       visit(gnode, { groups: [], level: null });
 
       // 並び：group（先頭の数字→名前）→ 級（初級→中級→上級）→ 番号
