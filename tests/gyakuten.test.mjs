@@ -72,6 +72,24 @@ test('ルール.txt が無ければ rulesSrc は null', () => {
   assert.equal(only(parse(['文章_テスト/第1問/画像_①.png'])).rulesSrc, null);
 });
 
+test('ルール.png（画像）：rulesImage に入り、問題にも警告にもならない', () => {
+  const g = only(parse(['逆転_テスト_減点方式/ルール.png', '逆転_テスト_減点方式/第1問/画像_①.png', '逆転_テスト_減点方式/第1問/画像_解答.png']));
+  assert.ok(g.rulesImage.endsWith(encodeURIComponent('ルール.png')));
+  assert.equal(g.rulesSrc, null);
+  assert.equal(g.questions.length, 1); assert.equal(g.warnings.length, 0);
+});
+
+test('ルールの画像は .webp・.jpg と大文字の拡張子も受け付け、ルール.txt と並んでも両方入る', () => {
+  assert.ok(only(parse(['文章_テスト/ルール.WEBP', '文章_テスト/第1問/画像_①.png'])).rulesImage);
+  const g = only(parse(['文章_テスト/ルール.jpg', '文章_テスト/ルール.txt', '文章_テスト/第1問/画像_①.png', '文章_テスト/第1問/画像_解答.png']));
+  assert.ok(g.rulesImage && g.rulesSrc); assert.equal(g.questions.length, 1); assert.equal(g.warnings.length, 0);
+});
+
+test('ルールの画像が無ければ rulesImage は null（問題フォルダの中の ルール.png はルール扱いしない）', () => {
+  assert.equal(only(parse(['文章_テスト/第1問/画像_①.png'])).rulesImage, null);
+  assert.equal(only(parse(['文章_テスト/第1問/画像_①.png', '文章_テスト/第1問/ルール.png'])).rulesImage, null);
+});
+
 test('一覧ファイル（読み込み用ファイル.txt）経由でも お題.txt・ルール.txt を受け付ける', async () => {
   const body = ['# list', '第1回/逆転_テスト_減点方式/ルール.txt', ...staged('第1回/逆転_テスト_減点方式/第3問', 'クリップ', 4, 'mp3').map((l) => l), '第1回/逆転_テスト_減点方式/第3問/お題.txt'].join('\r\n');
   const fetchImpl = async (url) => (decodeURIComponent(String(url)).endsWith('読み込み用ファイル.txt') ? { ok: true, text: async () => body, headers: { get: () => 'text/plain' } } : { ok: false });
