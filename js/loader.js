@@ -18,6 +18,9 @@
   const CATEGORY_ORDER = ['楽曲・音声', '楽曲・歌詞', '動画', '文章'];
   // ジャンルフォルダの先頭の _ 区切り（種別）がこれなら逆転ジャンル：全問を逆転として数え、TOP の並びは最後
   const GYAKUTEN_CATEGORY = '逆転';
+  // 逆転ジャンルの方式名。採点はルール画像の「逆転方式」（供託して正解チームで山分け）で、サイトは点数を出さない。
+  // 中の扱い（scoring）は減点のまま、表示する方式名だけをこれにする。ジャンルの方式が 逆転方式 のフォルダも逆転ジャンル
+  const GYAKUTEN_LABEL = '逆転方式';
   // 特別なテキスト（メモ・問題のファイルではない）：ジャンルフォルダの ルール.txt、問題フォルダの お題.txt
   const RULES_FILE = 'ルール.txt', ODAI_FILE = 'お題.txt';
   const isSpecial = (name, special) => nfc(name).toLowerCase() === special.toLowerCase();
@@ -388,10 +391,10 @@
     const genres = [];
     for (const gnode of root.dirs.values()) {
       const meta = parseGenreName(gnode.raw);
-      const gyakuten = meta.category === GYAKUTEN_CATEGORY;
+      const gyakuten = meta.category === GYAKUTEN_CATEGORY || nfc(meta.modeLabel || '') === GYAKUTEN_LABEL;
       const genre = {
         id: gnode.name, folder: gnode.raw, order: meta.order, name: meta.name,
-        category: meta.category, scoring: scoringOfLabel(meta.modeLabel) || (gyakuten ? 'deduct' : null), scoringLabel: meta.modeLabel || (gyakuten ? '減点方式' : undefined),
+        category: meta.category, scoring: scoringOfLabel(meta.modeLabel) || (gyakuten ? 'deduct' : null), scoringLabel: gyakuten ? GYAKUTEN_LABEL : meta.modeLabel,
         gyakuten, rulesSrc: null, rulesImage: null,
         type: null, round, base: u([roundName, gnode.raw].join('/'), base),
         questions: [], sections: [], summary: null, warnings: [],
@@ -501,6 +504,7 @@
         else if (level) { scoring = 'points'; scoringSource = 'level'; scoringLabel = '点数方式'; }
         else if (genre.scoring) { scoring = genre.scoring; scoringSource = 'genre'; scoringLabel = meta.modeLabel; }
         else { scoring = stages.length >= 2 ? 'deduct' : 'points'; scoringSource = 'guess'; scoringLabel = scoring === 'points' ? '点数方式' : '減点方式'; }
+        if (gyakuten) scoringLabel = GYAKUTEN_LABEL;   // 逆転ジャンルの問題は、どの決め方でも方式名は「逆転方式」
 
         const reverse = !!(o.folderQ && o.folderQ.reverse);
         const mode = isPair ? 'pair' : (reverse || (format === 'audio' && stages.length > TIER_POINTS.length && !hasAnswerMedia)) ? 'clips' : 'staged';

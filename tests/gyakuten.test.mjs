@@ -29,6 +29,18 @@ test('逆転ジャンル：方式が無くても減点方式（全角記号の�
   assert.ok(g.questions.every((q) => q.scoring === 'deduct'));
 });
 
+test('逆転ジャンル：方式の表示は「逆転方式」（ジャンルも全問も。中の採点は減点のまま）', () => {
+  const g = only(parse(gyaku()));
+  assert.equal(g.scoringLabel, '逆転方式'); assert.equal(g.scoring, 'deduct');
+  assert.ok(g.questions.every((q) => q.scoringLabel === '逆転方式' && q.scoring === 'deduct'));
+});
+
+test('方式が 逆転方式 のジャンルフォルダも逆転ジャンル', () => {
+  const g = only(parse(gyaku('文章_テスト_逆転方式')));
+  assert.equal(g.gyakuten, true); assert.equal(g.scoringLabel, '逆転方式'); assert.equal(g.scoring, 'deduct');
+  assert.ok(g.questions.every((q) => q.gyakuten === true && q.scoringLabel === '逆転方式'));
+});
+
 test('逆転でないジャンルは gyakuten が false', () => {
   const g = only(parse(gyaku('文章_テスト_減点方式')));
   assert.equal(g.gyakuten, false);
