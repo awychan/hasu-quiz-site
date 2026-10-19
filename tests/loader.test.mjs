@@ -563,3 +563,72 @@ test('全角の「！」を含むジャンル名：NFC・ID・URL・進捗キー
   const prog = { [g.id]: { [g.questions[0].key]: { done: true } } };
   assert.equal(JSON.parse(JSON.stringify(prog))[folder]['1'].done, true);
 });
+
+/* ---------- 問題フォルダの名前の合わない解答・コピーの印 ---------- */
+test('番号付きの問題フォルダ：名前の合わない解答（解答.png など）もその問題のもの（番号・キーはフォルダのまま）', () => {
+  const d = '文章_テスト_減点方式';
+  for (const ans of ['解答.png', '答え.png', '別名_解答.png', '別名 正解.png']) {
+    const r = parse([...staged(`${d}/第1問`, '01画像', 1), ...staged(`${d}/第4問`, '04画像', 3), `${d}/第4問/${ans}`]);
+    const q = only(r).questions.find((x) => x.folder === `${d}/第4問`);
+    assert.equal(only(r).questions.length, 2, ans);
+    assert.equal(q.key, '4', ans); assert.equal(q.label, '第4問', ans); assert.equal(q.stages.length, 3, ans);
+    assert.ok(q.answer.image && q.answer.image.endsWith(encodeURIComponent(ans)), ans);
+    assert.deepEqual(types(r).filter((t) => t !== 'no-answer'), [], ans);
+  }
+});
+
+test('番号付きの問題フォルダ：問題動画の幹が 1 つなら、名前の合わない正解動画もその問題の解答動画', () => {
+  const d = '動画_テスト_点数方式/第2問';
+  const q = q1(parse([`${d}/動画_問題.mp4`, `${d}/正解.mp4`]));
+  assert.equal(q.mode, 'pair'); assert.equal(q.key, '2');
+  assert.ok(q.pair.question && q.pair.answer.endsWith(encodeURIComponent('正解.mp4')));
+});
+
+test('番号付きの問題フォルダ：名前の合わない解答＋メモでもメモは付く（幹が複数の扱いにしない）', () => {
+  const d = '楽曲・音声_テスト_減点方式/第3問';
+  const r = parse([...staged(d, '03曲', 3, 'mp3'), `${d}/解答.png`, `${d}/_ダミー曲名.txt`]);
+  const q = q1(r);
+  assert.equal(q.key, '3'); assert.equal(q.answer.text, 'ダミー曲名'); assert.ok(q.answer.image);
+  assert.ok(!types(r).includes('multi-stem-note'));
+});
+
+test('段階を持つ幹が 2 つ以上の問題フォルダ・番号の無いフォルダは今までどおり（解答だけの幹は割り当てない）', () => {
+  const d = '文章_テスト_減点方式';
+  const r1 = parse([...staged(`${d}/第5問`, '05画像', 2), ...staged(`${d}/第5問`, '05 写真', 2), `${d}/第5問/解答.png`]);
+  assert.deepEqual(only(r1).questions.map((q) => q.key).sort(), ['5-1', '5-2']);
+  assert.ok(types(r1).includes('unassigned'));
+  const r2 = parse([...staged(`${d}/初級`, '画像', 2), `${d}/初級/解答.png`]);
+  assert.ok(types(r2).includes('unassigned'), '級フォルダ（問題フォルダではない）の名前の合わない解答はくっつけない');
+});
+
+test('コピーの印（ (1)・（2）・のコピー・Copy of）は落として読む。URL は元の名前のまま', () => {
+  const d = '文章_テスト_減点方式/第12問';
+  const r = parse([`${d}/02画像_① (1).png`, `${d}/02画像_②（2）.png`, `${d}/02画像_解答 (1).png`]);
+  const q = q1(r);
+  assert.equal(q.key, '12'); assert.equal(q.stages.length, 2);
+  assert.ok(q.answer.image.endsWith(encodeURIComponent('02画像_解答 (1).png')));
+  assert.deepEqual(types(r), []);
+  for (const ans of ['02画像_解答.png のコピー', 'Copy of 02画像_解答.png']) {
+    const q2 = q1(parse([`${d}/02画像_①.png`, `${d}/${ans}`]));
+    assert.ok(q2.answer.image && q2.answer.image.endsWith(encodeURIComponent(ans)), ans);
+  }
+  const q3 = q1(parse([`${d}/02画像_①.png`, `${d}/お題.txt のコピー`]));
+  assert.ok(q3.odaiSrc, 'お題.txt のコピーもお題');
+});
+
+test('コピーの印でない括弧・語はそのまま（名前の途中の (1)、拡張子の無い「のコピー」）', () => {
+  const d = '文章_テスト_減点方式/第1問';
+  const q = q1(parse([`${d}/画像(1)版_①.png`, `${d}/画像(1)版_解答.png`]));
+  assert.equal(q.stem, '画像(1)版');
+  const r = parse([`${d}/画像_①.png`, `${d}/メモのコピー`]);
+  assert.ok(types(r).includes('unassigned'), '拡張子の無いファイルは読まない');
+});
+
+test('幹が複数のフォルダ：問題にならない幹（解答の画像だけ）は番号を使わない（ほかの問題の番号・キーがずれない）', () => {
+  const d = '文章_テスト_減点方式';
+  const r = parse([...staged(`${d}/第5問`, '05画像', 2), ...staged(`${d}/第5問`, '05 写真', 2), `${d}/第5問/解答.png`]);
+  const qs = only(r).questions;
+  assert.deepEqual(qs.map((q) => q.key).sort(), ['5-1', '5-2']);
+  assert.deepEqual(qs.map((q) => q.label).sort(), ['問題1', '問題2']);
+  assert.equal(r.warnings.filter((w) => w.type === 'unassigned').length, 1);
+});

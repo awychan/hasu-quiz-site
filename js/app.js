@@ -167,10 +167,15 @@
     const dense = items.length > 3 || items.some((s) => [...s].length > 7);
     return `<span class="combo-list${dense ? ' dense' : ''}">${items.map((s) => `<span class="combo-item">${wbr(esc(s))}</span>`).join('')}</span>`;
   }
+  // 逆転の解答（解答.txt など）：「グループ：曲名」の行を、小さいグループ名＋曲名の組にして並べる（css の「逆転の解答の帯」で 3 列）
+  function sheetHtml(items) {
+    return `<span class="sheet-list">${items.map((it) => `<span class="sheet-item">${it.label ? `<span class="sheet-lbl">${esc(it.label)}</span>` : ''}<span class="sheet-val">${it.value ? wbr(esc(it.value)) : '—'}</span></span>`).join('')}</span>`;
+  }
   function textPart(t, part) {
     if (t === undefined) return '<span class="muted">読み込み中…</span>';
-    if (t === null) return `<span class="muted">${part === 'odai' ? '（お題.txt を読めません）' : part === 'rules' ? '（ルール.txt を読めません）' : '（メモを読めません）'}</span>`;
+    if (t === null) return `<span class="muted">${part === 'odai' ? '（お題.txt を読めません）' : part === 'sheet' ? '（解答のファイルを読めません）' : part === 'rules' ? '（ルール.txt を読めません）' : '（メモを読めません）'}</span>`;
     if (part === 'first') return wbr(esc(firstLine(t)));
+    if (part === 'sheet') { const items = L.answerSheet(t); return items.length ? sheetHtml(items) : '<span class="muted">（解答のファイルが空です）</span>'; }
     if (part === 'rules') return t ? esc(t) : '<span class="muted">（ルール.txt が空です）</span>';
     if (part === 'odai') { const ls = odaiLines(t); return ls.length ? `<ul class="odai-list">${ls.map((l) => `<li>${wbr(esc(l))}</li>`).join('')}</ul>` : '<span class="muted">（お題.txt が空です）</span>'; }
     const m = /^clip:(\d+)$/.exec(part || '');
@@ -201,6 +206,7 @@
   const lastPlayed = {};            // ジャンルごとに最後に流した段階（一覧型の「現在の点数」）
   let videoMode = 'q';              // 対動画：'q' 問題動画 / 'a' 解答動画
   let subView = 'stages';           // 段階ヒント画面：'stages' / 'video'（解答動画）
+  let sheetShown = false;           // 逆転ジャンルの逆転：解答の帯を出しているか（記録には残さない：出題済は手動のまま。画面を移ると隠す）
   let showReport = false;
   let scrollFocus = false;
   let cur = { round: null, genre: null, q: null };
@@ -739,6 +745,12 @@
     }).join('');
     // お題：お題.txt があればその行を箇条書きで（ヘッダーには収まらないので格子の上の帯）。無ければ従来どおりメモの 1 行目
     const odai = q.odaiSrc ? `<div class="clip-odai"><span class="clip-odai-lbl">お題</span>${textSpan(q.odaiSrc, 'odai', 'odai-body')}</div>` : '';
+    // 逆転ジャンルの逆転の解答（解答.txt など）：「解答を表示」でお題の帯と入れ替える（グループ名は解答の行にもあるので、クリップのカードの高さを保てる）
+    const sheet = gy && !!q.answer.sheetSrc;
+    const sheetStrip = sheet && sheetShown ? `<div class="clip-sheet"><span class="clip-sheet-lbl">解答</span>${textSpan(q.answer.sheetSrc, 'sheet', 'sheet-body')}</div>` : '';
+    const sheetBtn = !sheet ? '' : sheetShown
+      ? `<button class="btn" data-action="sheet-toggle">${ICON.eyeOff()}解答を隠す</button>`
+      : `<button class="btn red" data-action="sheet-toggle">${ICON.eye()}解答を表示</button>`;
     const sub = q.odaiSrc ? '' : q.answer.textSrc ? textSpan(q.answer.textSrc, 'first', 'sub-text') : '';
     // メモに行が無い番号の答えを開いたときだけ、メモ全文を 1 回だけ出す（開く前に出すと他の番号の答えが見えてしまう）
     const noteText = q.answer.textSrc ? textOf(q.answer.textSrc) : undefined;
@@ -751,9 +763,9 @@
         + (q.odaiSrc ? '' : `<div class="pill clip-sub"><span>お題</span><span class="pill-val">${sub || '—'}</span></div>`)
         + (gy ? '' : `<div class="hdr-right">${count(opened, q.stages.length, '答え')}</div>`),
       cls: 'clips',
-      main: `${odai}${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
+      main: `${sheetStrip || odai}${noteStrip}<div class="clip-grid" style="grid-template-rows:repeat(${rows},minmax(0,1fr))">${tiles}</div>`,
       footer: `${btnBack(genreHref(g))}
-        ${gy ? doneControl(q, st) : `<button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>`}
+        ${gy ? sheetBtn + doneControl(q, st) : `<button class="btn" data-action="clips-hide-all" ${opened ? '' : 'disabled'}>${ICON.eyeOff()}すべての答えを隠す</button>`}
         <button class="btn ghost" data-action="reset-q" data-key="${esc(q.key)}">${ICON.refresh()}問題をリセット</button>
         ${npBlock(np)}${btnTop(g.round)}`,
     });
@@ -830,7 +842,7 @@
     if (q.mode === 'clips') return renderClipsQuiz(genre, q);
     return renderStagedQuiz(genre, q);
   }
-  function route() { stopMedia(); videoMode = 'q'; subView = 'stages'; showReport = false; scrollFocus = true; draw(); scrollFocus = false; window.scrollTo(0, 0); }
+  function route() { stopMedia(); videoMode = 'q'; subView = 'stages'; sheetShown = false; showReport = false; scrollFocus = true; draw(); scrollFocus = false; window.scrollTo(0, 0); }
   function rerender() { draw(); }
 
   /* ---------------- 操作 ---------------- */
@@ -867,7 +879,8 @@
       case 'stop': stopAudio(); refresh(); break;
       case 'audio-toggle': toggleAudio(); refresh(); break;
       case 'mark-done': P.patch(r, g.id, el.dataset.key, { done: true }); rerender(); break;
-      case 'unmark-done': P.patch(r, g.id, el.dataset.key, { done: false, answer: false }); rerender(); break;   // 逆転ジャンルの逆転：出題済 → 出題中に戻す
+      case 'unmark-done': P.patch(r, g.id, el.dataset.key, { done: false, answer: false }); sheetShown = false; rerender(); break;   // 逆転ジャンルの逆転：出題済 → 出題中に戻す
+      case 'sheet-toggle': sheetShown = !sheetShown; rerender(); break;   // 逆転ジャンルの逆転：解答の帯（お題の帯と入れ替え）
       case 'reset-q': {
         const tq = findQ(g, el.dataset.key); if (!tq) break;
         if (confirm(`${tq.label} の記録（済・出題中）をリセットしますか？`)) {
@@ -875,7 +888,7 @@
           { const v = videoOnStage(); if (v) { v.pause(); try { v.currentTime = 0; } catch (e) { /* 未読込 */ } } }
           videoMode = 'q';   // 対動画：解答動画を流していても問題動画に戻す（再描画で <video> も問題動画の src で作り直される）
           P.resetQ(r, g.id, tq.key);
-          subView = 'stages';
+          subView = 'stages'; sheetShown = false;
           toast(`${tq.label} をリセットしました`); rerender();
         }
         break;

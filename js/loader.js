@@ -39,6 +39,12 @@
   function tailNumber(s) { let i = s.length; while (i > 0 && s.charCodeAt(i - 1) >= 48 && s.charCodeAt(i - 1) <= 57) i--; return i < s.length ? parseInt(s.slice(i), 10) : null; }
   const extOf = (name) => { const m = name.match(/\.([^./]+)$/); return m ? m[1].toLowerCase() : ''; };
   const dropExt = (name) => name.replace(/\.[^./]+$/, '');
+  // Drive・ダウンロードのコピーの印を落とした名前（印・拡張子を読むため。URL と表示は元の名前のまま）：
+  // 「Copy of 名前」「名前.txt のコピー」（拡張子の後ろ）「名前 (1).png」「名前（2）.png」
+  const stripCopyMark = (name) => nfc(name)
+    .replace(/^Copy of +/i, '')
+    .replace(/^(.*\.[A-Za-z0-9]+)[ 　]*のコピー$/, '$1')
+    .replace(/[ 　]*[(（]\d{1,2}[)）](\.[^./]+)$/, '$1');
   const kindOfFile = (name) => AUDIO_EXT.test(name) ? 'audio' : VIDEO_EXT.test(name) ? 'video' : IMAGE_EXT.test(name) ? 'image' : TEXT_EXT.test(name) ? 'text' : null;
   const naturalCmp = (a, b) => String(a).localeCompare(String(b), 'ja', { numeric: true });
 
@@ -318,6 +324,15 @@
   function comboItems(line) {
     return String(line == null ? '' : line).split('・').map((s) => s.trim()).filter(Boolean);
   }
+  // 逆転の解答 txt（解答.txt など）：1 行に「グループ：曲名」→ [{ label, value }]。区切りは最初の全角「：」、無ければ最初の「:」
+  // （曲名の中の「:」で切らないよう全角が先）。区切りの無い行・前が空の行は label: null。BOM・CRLF・空行・前後の空白（全角も）は無視
+  function answerSheet(text) {
+    return String(text == null ? '' : text).replace(/^﻿/, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean).map((l) => {
+      let i = l.indexOf('：'); if (i < 0) i = l.indexOf(':');
+      const label = i > 0 ? l.slice(0, i).trim() : '';
+      return label ? { label, value: l.slice(i + 1).trim() } : { label: null, value: i === 0 ? l.slice(1).trim() : l };
+    });
+  }
 
   /* ---------- 回の組み立て（純関数） ---------- */
   // files：回フォルダからの相対パス。末尾が「/」の行はフォルダ（空フォルダを見つけるため）
@@ -380,7 +395,7 @@
         if (same.name !== nfc(name)) node.marks.push({ type: 'duplicate-name', path: relOf(segs), message: `同じ名前として読むファイルが複数あります（「${same.name}」と「${nfc(name)}」）→ 後のものは読みません` });
         return;
       }
-      node.files.push({ raw: name, name: nfc(name), norm: norm(name), segs });
+      node.files.push({ raw: name, name: nfc(name), norm: norm(name), clean: stripCopyMark(name), segs });
       fileCount++;
     });
     root.marks.forEach((m) => warn(warnings, m.type, m.path, m.message));
@@ -409,11 +424,11 @@
       const processLeaf = (node, ctx) => {
         const notes = [], items = [];
         // お題.txt は問題のファイルではない（答えのメモにも未割り当てにも数えない）。このフォルダの問題すべてに付ける
-        const odaiFile = node.files.find((f) => isSpecial(f.raw, ODAI_FILE));
+        const odaiFile = node.files.find((f) => isSpecial(f.clean, ODAI_FILE));
         const odaiSrc = odaiFile ? srcOf(odaiFile.segs) : null;
         node.files.filter((f) => f !== odaiFile).forEach((f) => {
-          const kind = kindOfFile(f.raw);
-          const c = classify(f.raw, kind === 'text');
+          const kind = kindOfFile(f.clean);
+          const c = classify(f.clean, kind === 'text');
           if (kind === 'text' && c.marker !== 'stage' && c.marker !== 'answer') notes.push(f);
           else if (kind) items.push(Object.assign({ kind }, f, c));
           else warn(gw, 'unassigned', relOf(f.segs), '媒体として読めない拡張子');
@@ -424,8 +439,14 @@
         }
         const stems = new Map();
         items.forEach((it) => { const k = it.stem.toLowerCase(); if (!stems.has(k)) stems.set(k, { stem: it.stem, items: [] }); stems.get(k).items.push(it); });
-        const stemList = [...stems.values()].sort((a, b) => naturalCmp(a.stem, b.stem));
+        let stemList = [...stems.values()].sort((a, b) => naturalCmp(a.stem, b.stem));
         const folderQ = node === gnode ? null : questionFolderOf(node.raw, node.dirs.size > 0);
+        // 番号付きの問題フォルダは問題 1 つ：段階か「問題」の印を持つ幹が 1 つだけなら、ほかの幹のファイル（名前の合わない
+        // 解答.txt・_お題_解答.txt など）もその問題のものとして読む。幹ごとに別の問題にすると番号もメモもずれる
+        if (folderQ && stemList.length > 1) {
+          const real = stemList.filter((s) => s.items.some((it) => it.marker === 'stage' || it.marker === 'question'));
+          if (real.length === 1) { stemList.forEach((s) => { if (s !== real[0]) real[0].items.push(...s.items); }); stemList = real; }
+        }
         if (folderQ && folderQ.unknown.length) {
           warn(gw, 'unknown-suffix', relOf(node.segs), `問題フォルダの知らない接尾辞（${folderQ.unknown.join('・')}）→ 減点方式として読みます`);
         }
@@ -437,9 +458,13 @@
           buildQuestion(stemList[0], { node, ctx, id, label, folderQ, notes, multi: false, odaiSrc });
         } else {
           if (notes.length) warn(gw, 'multi-stem-note', relOf(node.segs), `幹が ${stemList.length} 個あるフォルダのメモはどの問題にも付けません`);
-          const tails = stemList.map((s) => tailNumber(s.stem));
+          // 問題にならない幹（段階も「問題」の印も解答動画も無い：解答の画像・txt だけなど）は番号を使わない。使うと他の問題の番号・キーがずれる
+          const makesQ = (s) => s.items.some((it) => it.marker === 'stage' || it.marker === 'question' || (it.marker === 'answer' && it.kind === 'video'));
+          stemList.filter((s) => !makesQ(s)).forEach((s) => s.items.forEach((it) => warn(gw, 'unassigned', relOf(it.segs), '段階（①…）も問題動画も無い幹のファイル')));
+          const numbered = stemList.filter(makesQ);
+          const tails = numbered.map((s) => tailNumber(s.stem));
           const useTails = tails.every((t) => t != null) && new Set(tails).size === tails.length;
-          stemList.forEach((s, i) => {
+          numbered.forEach((s, i) => {
             const id = useTails ? tails[i] : i + 1;
             // 番号付きの問題フォルダ（第5問 など）の中に幹が複数：キーは「<フォルダの番号>-<何番目か>」（他の問題フォルダの 1, 2 とぶつけない）
             const keyId = folderQ ? `${folderQ.id}-${i + 1}` : null;
@@ -471,11 +496,12 @@
           return;
         }
         unmarked.forEach((it) => extra.push(it));
-        const answer = { image: null, audio: null, video: null, text: null, textSrc: null };
+        const answer = { image: null, audio: null, video: null, text: null, textSrc: null, sheetSrc: null };
         as.forEach((it) => {
           const slot = it.kind === 'text' ? 'textSrc' : it.kind;
           if (answer[slot]) extra.push(it); else answer[slot] = srcOf(it.segs);
         });
+        const answerTextSrc = answer.textSrc;   // 解答の印の付いた txt（メモで埋める前）
         extra.forEach((it) => warn(qw, 'unassigned', relOf(it.segs), '問題のどこにも当てはまらないファイル'));
 
         stages.sort((a, b) => a.n - b.n || naturalCmp(a.name, b.name));
@@ -508,6 +534,9 @@
 
         const reverse = !!(o.folderQ && o.folderQ.reverse);
         const mode = isPair ? 'pair' : (reverse || (format === 'audio' && stages.length > TIER_POINTS.length && !hasAnswerMedia)) ? 'clips' : 'staged';
+        // 逆転ジャンルの逆転：メモ（_….txt）の ①〜⑳ は各クリップの組み合わせなので textSrc はメモのまま。
+        // 解答の txt（解答.txt など。「グループ：曲名」の行）は sheetSrc に分ける（answerSheet で読む）
+        if (gyakuten && mode === 'clips' && answerTextSrc) { answer.sheetSrc = answerTextSrc; answer.textSrc = notes.length ? notes[0].src : null; }
         const fixed = o.folderQ && o.folderQ.fixedPoints != null ? o.folderQ.fixedPoints : null;
         const pointsValue = scoring === 'points' ? (fixed != null ? fixed : level ? level.points : null) : null;
         const points = stages.map((s) => scoring === 'deduct' ? (TIER_POINTS[s.n - 1] != null ? TIER_POINTS[s.n - 1] : null) : pointsValue);
@@ -554,9 +583,9 @@
         });
       };
       // ジャンル直下の ルール.txt・ルール.png など：問題の選択画面に出す。問題のファイルとしては読まない
-      const rulesFile = gnode.files.find((f) => isSpecial(f.raw, RULES_FILE));
+      const rulesFile = gnode.files.find((f) => isSpecial(f.clean, RULES_FILE));
       if (rulesFile) { genre.rulesSrc = srcOf(rulesFile.segs); gnode.files = gnode.files.filter((f) => f !== rulesFile); }
-      const rulesImage = gnode.files.find((f) => isRulesImage(f.raw));
+      const rulesImage = gnode.files.find((f) => isRulesImage(f.clean));
       if (rulesImage) { genre.rulesImage = srcOf(rulesImage.segs); gnode.files = gnode.files.filter((f) => f !== rulesImage); }
       visit(gnode, { groups: [], level: null });
 
@@ -632,7 +661,7 @@
   function clearTextCache() { textCache.clear(); }
 
   window.QuizLoader = {
-    discoverRounds, loadRound, loadText, clearTextCache, base: () => BASE, baseInfo, LIST, parse, noteLines, comboItems,
+    discoverRounds, loadRound, loadText, clearTextCache, base: () => BASE, baseInfo, LIST, parse, noteLines, comboItems, answerSheet,
     // 検査用（scripts/check_media.mjs・tests）
     _internal: { walk, fetchListing, classify, parseQuestionFolder, questionFolderOf, levelOf, stripPrefix, trimSep, norm, hiddenDir, hiddenFile, TIER_POINTS, LEVELS, MARK_TOO_DEEP, MARK_UNREADABLE },
   };

@@ -160,3 +160,58 @@ test('メモの 1 行 → 組み合わせ：noteLines と comboItems をつな�
   assert.deepEqual(L.comboItems(lines[2]), ['ダミーB', 'ダミーD', 'ダミーA']);
   assert.equal(lines[3], undefined, 'メモに無い番号は undefined（画面は「行がありません」と出す）');
 });
+
+/* ---------- 逆転の解答 txt（解答.txt など） ---------- */
+// 実データと同じ形：クリップは 03<お題>_①…⑳.mp3、メモは _<お題>.txt、お題.txt、解答の txt は名前がいろいろ
+const ODAI = 'ダミーA・ダミーB・ダミーC';
+const gyakuQ3 = (answerName) => {
+  const d = '逆転_テスト_減点方式';
+  return [
+    `${d}/第1問/画像_①.png`, `${d}/第1問/画像_解答.png`, `${d}/第2問/画像_①.png`, `${d}/第2問/画像_解答.png`,
+    ...staged(`${d}/第3問`, `03${ODAI}`, 20, 'mp3'), `${d}/第3問/_${ODAI}.txt`, `${d}/第3問/お題.txt`,
+    ...(answerName ? [`${d}/第3問/${answerName}`] : []),
+  ];
+};
+
+test('逆転の解答 txt：名前が何でも第3問のまま（キー 3）、メモは組み合わせ、解答は sheetSrc', () => {
+  for (const name of ['解答.txt', `_${ODAI}_解答.txt`, `03${ODAI}_解答.txt`, '答え.txt', '解答.txt のコピー', '解答 (1).txt']) {
+    const r = parse(gyakuQ3(name));
+    const g = only(r);
+    assert.deepEqual(g.questions.map((q) => q.label), ['第1問', '第2問', '第3問'], name);
+    const q = g.questions[2];
+    assert.equal(q.key, '3', name); assert.equal(q.mode, 'clips', name); assert.equal(q.stages.length, 20, name);
+    assert.ok(q.answer.textSrc.endsWith(encodeURIComponent(`_${ODAI}.txt`)), `${name}：組み合わせはメモから`);
+    assert.ok(q.answer.sheetSrc.endsWith(encodeURIComponent(name)), `${name}：解答は sheetSrc`);
+    assert.ok(q.odaiSrc, name);
+    assert.deepEqual(r.warnings, [], name);
+  }
+});
+
+test('逆転の解答 txt が無ければ sheetSrc は null（今までどおり）', () => {
+  const q = only(parse(gyakuQ3(null))).questions[2];
+  assert.equal(q.key, '3'); assert.equal(q.answer.sheetSrc, null);
+  assert.ok(q.answer.textSrc.endsWith(encodeURIComponent(`_${ODAI}.txt`)));
+});
+
+test('逆転ジャンル以外の clips・段階ヒントの解答 txt は今までどおり textSrc（sheetSrc は使わない）', () => {
+  const d = '楽曲・音声_テスト_減点方式/第3問';
+  const q = q1(parse([...staged(d, 'クリップ', 20, 'mp3'), `${d}/クリップ_解答.txt`]));
+  assert.equal(q.mode, 'clips'); assert.equal(q.gyakuten, false);
+  assert.ok(q.answer.textSrc.endsWith(encodeURIComponent('クリップ_解答.txt'))); assert.equal(q.answer.sheetSrc, null);
+});
+
+test('answerSheet：「グループ：曲名」を 1 行ずつ（全角／半角コロン・CRLF・BOM・空行・前後の空白）', () => {
+  const t = '﻿ダミーA：ダミー曲1\r\nダミーB:ダミー曲2\r\n\r\n　ダミーC ： ダミー曲3 (ダミー版)　\r\n';
+  assert.deepEqual(L.answerSheet(t), [
+    { label: 'ダミーA', value: 'ダミー曲1' }, { label: 'ダミーB', value: 'ダミー曲2' }, { label: 'ダミーC', value: 'ダミー曲3 (ダミー版)' },
+  ]);
+});
+
+test('answerSheet：全角コロンが先、曲名の中の「:」は切らない。区切りの無い行・前が空の行は label: null', () => {
+  assert.deepEqual(L.answerSheet('ダミーA：Dummy:Song'), [{ label: 'ダミーA', value: 'Dummy:Song' }]);
+  assert.deepEqual(L.answerSheet('ダミー曲だけ'), [{ label: null, value: 'ダミー曲だけ' }]);
+  assert.deepEqual(L.answerSheet('：ダミー曲'), [{ label: null, value: 'ダミー曲' }]);
+  assert.deepEqual(L.answerSheet('ダミーA：'), [{ label: 'ダミーA', value: '' }]);
+  assert.deepEqual(L.answerSheet(''), []);
+  assert.deepEqual(L.answerSheet(null), []);
+});

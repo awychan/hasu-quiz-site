@@ -394,6 +394,15 @@ button:focus-visible, a:focus-visible { outline: 3px solid var(--link); outline-
 .odai-list { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 2px 28px; font-family: var(--serif); font-weight: 700; font-size: 20px; line-height: 28px; word-break: keep-all; overflow-wrap: anywhere; }
 .odai-list li::before { content: "\2022"; color: var(--red); margin-right: 8px; }
 
+/* ---- 逆転の解答の帯（「解答を表示」でお題の帯と入れ替え。グループ名 → 曲名を 3 列、長い曲名は折り返す） ---- */
+.clip-sheet { flex: none; display: flex; align-items: flex-start; gap: 14px; max-height: 148px; padding: 10px 20px; border-radius: 14px; background: var(--pink-bg); border: 1px solid var(--pink-line); }
+.clip-sheet-lbl { flex: none; font-size: 13px; font-weight: 700; color: var(--red); line-height: 28px; }
+.sheet-body { flex: 1; min-width: 0; max-height: 128px; overflow: auto; display: block; }
+.sheet-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px 24px; }
+.sheet-item { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.sheet-lbl { flex: none; font-size: 13px; font-weight: 700; color: var(--red); }
+.sheet-val { min-width: 0; font-family: var(--serif); font-weight: 700; font-size: 20px; line-height: 28px; word-break: keep-all; overflow-wrap: anywhere; }
+
 /* ---- 問題の選択画面：ルール.txt ---- */
 .sel.has-rules .sec.single { flex: none; }
 .rules-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 18px 28px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); }
